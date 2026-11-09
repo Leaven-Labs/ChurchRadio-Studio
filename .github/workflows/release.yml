@@ -194,8 +194,10 @@ jobs:
 
       # ------------------------------------------------------------------
       # Update test: install the PREVIOUS release, give it settings, then run this installer
-      # over it. The update must keep the install folder, the shortcuts, the settings and the
-      # song list. Skipped when the repository has no earlier installer release.
+      # over it. The update must keep the shortcuts, the settings and the song list. The previous
+      # release goes into a folder with the app's earlier name, as on PCs that came from the old
+      # app: the update must move to a "ChurchRadio Studio" folder beside it and remove the old
+      # folder. Skipped when the repository has no earlier installer release.
       # ------------------------------------------------------------------
       - name: Update test (previous release -> this build)
         shell: pwsh
@@ -214,7 +216,9 @@ jobs:
           }
           if (-not $old) { Write-Host "No earlier installer release: update test skipped."; exit 0 }
 
-          $dir = Join-Path $env:RUNNER_TEMP "upgrade-install"
+          $parent = Join-Path $env:RUNNER_TEMP "upgrade-install"
+          $dir = Join-Path $parent "KNAF Broadcast Builder"
+          $newDir = Join-Path $parent "ChurchRadio Studio"
           $p = Start-Process -FilePath $old.FullName -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`""
           if ($p.ExitCode -ne 0) { throw "The previous installer failed ($($p.ExitCode))." }
           $programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -231,8 +235,9 @@ jobs:
           # Update with this build, as a volunteer would: no folder given, the installer finds the old one.
           $p = Start-Process -FilePath dist\ChurchRadio-Studio-Setup.exe -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/LOG=`"$env:RUNNER_TEMP\update.log`""
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\update.log" | Write-Host; throw "Update failed ($($p.ExitCode))." }
-          $exe = Join-Path $dir "ChurchRadio-Studio.exe"
-          if (-not (Test-Path $exe)) { throw "The update did not install into the existing folder $dir." }
+          $exe = Join-Path $newDir "ChurchRadio-Studio.exe"
+          if (-not (Test-Path $exe)) { Get-Content "$env:RUNNER_TEMP\update.log" | Write-Host; throw "The update did not install into $newDir." }
+          if (Test-Path $dir) { throw "The old program folder $dir was left behind." }
           if (-not (Test-Path (Join-Path $programs "ChurchRadio Studio\ChurchRadio Studio.lnk"))) { throw "No ChurchRadio Studio Start-menu shortcut." }
 
           $out = (& $exe --selftest 2>&1 | ForEach-Object { [string]$_ }) -join "`n"
@@ -243,9 +248,9 @@ jobs:
           $cfg = Get-Content (Join-Path $env:APPDATA "ChurchRadio Studio\config.json") -Raw | ConvertFrom-Json
           if ($cfg.broadcast_name -ne "Update Test") { throw "The settings were not carried over." }
 
-          $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+          $un = Get-ChildItem $newDir -Filter "unins*.exe" | Select-Object -First 1
           Start-Process -FilePath $un.FullName -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" | Out-Null
-          Write-Host "Update test PASS: updated in place, shortcut, settings and song list kept."
+          Write-Host "Update test PASS: moved out of the old-name folder, shortcut, settings and song list kept."
 
       - name: SHA-256 checksum
         shell: pwsh

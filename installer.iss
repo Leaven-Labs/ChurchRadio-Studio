@@ -14,6 +14,10 @@
 ; folder: they live in %APPDATA%\ChurchRadio Studio, and the speech models in
 ; C:\ProgramData\ChurchRadio Studio\models. Uninstalling leaves both, so a reinstall or an
 ; update keeps everything.
+;
+; An update normally installs into the folder of the existing installation. If that folder is
+; still named after the app's earlier name, the update installs into a "ChurchRadio Studio"
+; folder next to it instead and removes the old folder (see [Code]).
 
 #define AppName "ChurchRadio Studio"
 #define AppExe "ChurchRadio-Studio.exe"
@@ -30,7 +34,8 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher=Aaron Steger, Bethany Lutheran Church (Fredericksburg, Texas)
 AppCopyright=Copyright (c) 2026 Aaron Steger. MIT License.
 LicenseFile=LICENSE
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={code:GetDefaultDir}
+UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UsePreviousGroup=no
@@ -68,3 +73,55 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
+
+[Code]
+const
+  UninstKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{1C9F0112-E6A3-47EE-AA4A-5B5EADD57CF0}_is1';
+  OldFolderName = 'KNAF Broadcast Builder';
+
+var
+  OldDir: String;
+
+// The folder of the existing installation, or '' if there is none.
+function PreviousAppDir(): String;
+var
+  Root: Integer;
+begin
+  Result := '';
+  if IsAdminInstallMode() then
+    Root := HKLM64
+  else
+    Root := HKCU;
+  if not RegQueryStringValue(Root, UninstKey, 'Inno Setup: App Path', Result) then
+    Result := '';
+  Result := RemoveBackslashUnlessRoot(Result);
+end;
+
+// Where to install: the existing installation's folder, except that a folder still named after
+// the earlier name is swapped for a "ChurchRadio Studio" folder in the same place.
+function GetDefaultDir(Param: String): String;
+var
+  Prev: String;
+begin
+  Prev := PreviousAppDir();
+  if Prev = '' then
+    Result := ExpandConstant('{autopf}\{#AppName}')
+  else if CompareText(ExtractFileName(Prev), OldFolderName) = 0 then
+  begin
+    OldDir := Prev;
+    Result := AddBackslash(ExtractFileDir(Prev)) + '{#AppName}';
+  end
+  else
+    Result := Prev;
+end;
+
+// After an update into the new folder, remove the old program folder. Only a folder that holds
+// an Inno Setup uninstaller is removed, so nothing but an old program folder is ever deleted.
+// The user's settings and the speech models live elsewhere and are not touched.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and (OldDir <> '') and
+     (CompareText(OldDir, RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) <> 0) and
+     FileExists(AddBackslash(OldDir) + 'unins000.exe') then
+    DelTree(OldDir, True, True, True);
+end;

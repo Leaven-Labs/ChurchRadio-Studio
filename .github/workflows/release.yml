@@ -1,0 +1,300 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+  push:
+    tags:
+      - "v*"
+  # Build + tests + smoke on every PR so the branch has a green run (no release step).
+  pull_request:
+
+# One build at a time per branch/PR; don't let manual runs pile up.
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # contents:write lets a release run create the tag + GitHub release. A PR run only
+  # builds/tests/smokes (no release step) and the token is read-only there, so this is safe.
+  contents: write
+
+jobs:
+  build:
+    name: Build .exe on Windows
+    runs-on: windows-latest
+
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Run unit tests (stop if any fail)
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
+      # The version: the tag for a release, else a dev number (PR builds).
+      - name: Work out the version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+              $payload = (Get-Content "$env:GITHUB_EVENT_PATH" -Raw) | ConvertFrom-Json
+              $tag = $payload.inputs.version
+          } elseif ($env:GITHUB_REF -like "refs/tags/v*") {
+              $tag = $env:GITHUB_REF_NAME
+          } else {
+              $tag = "v0.0.0-dev$env:GITHUB_RUN_NUMBER"
+          }
+          "CRS_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CRS_VERSION=$($tag.TrimStart('v'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Content version.txt $tag.TrimStart('v') -Encoding ascii -NoNewline
+          Write-Host "Version: $tag"
+
+      # ------------------------------------------------------------------
+      # Build the program folder from the CLEAN tracked files. Do NOT edit
+      # config.json before building: it is bundled, so any change here would
+      # ship to every user's first-run copy.
+      # ------------------------------------------------------------------
+      - name: Build the program folder (PyInstaller)
+        shell: pwsh
+        run: |
+          pyinstaller ChurchRadio-Studio.spec
+          if (-not (Test-Path dist\ChurchRadio-Studio\ChurchRadio-Studio.exe)) { throw "PyInstaller did not make the program folder" }
+          $mb = [math]::Round(((Get-ChildItem dist\ChurchRadio-Studio -Recurse -File | Measure-Object Length -Sum).Sum)/1MB, 1)
+          Write-Host "Program folder: $mb MB"
+
+      # ffmpeg is installed with the app: the LGPL build from BtbN/FFmpeg-Builds (no GPL parts,
+      # so it can be shipped with this app). The newest release-branch build is used; the step
+      # checks that it is LGPL, that it can write MP3 and that the filters the app uses exist.
+      - name: Get ffmpeg (LGPL build)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rel = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } `
+              -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest"
+          $assets = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n(\d+)\.(\d+)-latest-win64-lgpl-\d+\.\d+\.zip$' } |
+              Sort-Object { [int]($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$','$1') * 1000 + [int]($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$','$2') } -Descending
+          if (-not $assets) { throw "No LGPL win64 ffmpeg build found in BtbN/FFmpeg-Builds 'latest'." }
+          $asset = $assets[0]
+          Write-Host "ffmpeg build: $($asset.name)"
+          $zip = Join-Path $env:RUNNER_TEMP $asset.name
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+          Write-Host "SHA-256: $((Get-FileHash $zip -Algorithm SHA256).Hash)"
+          $x = Join-Path $env:RUNNER_TEMP "ffmpeg-x"
+          Expand-Archive $zip -DestinationPath $x -Force
+          $bin = Get-ChildItem $x -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $root = Split-Path (Split-Path $bin.FullName)
+          New-Item -ItemType Directory -Force -Path build\ffmpeg | Out-Null
+          Copy-Item (Join-Path $root "bin\ffmpeg.exe"), (Join-Path $root "bin\ffprobe.exe") build\ffmpeg\
+          Get-ChildItem $root -File -Filter "LICENSE*" | Copy-Item -Destination build\ffmpeg\
+          @(
+            "ffmpeg is free software licensed under the GNU Lesser General Public License (LGPL) 2.1 or later.",
+            "This copy is the LGPL Windows build $($asset.name) from https://github.com/BtbN/FFmpeg-Builds",
+            "(build scripts and the exact library versions are listed there).",
+            "ffmpeg source code: https://ffmpeg.org/download.html  -- ChurchRadio Studio runs ffmpeg as a",
+            "separate program; it is not changed."
+          ) | Set-Content build\ffmpeg\README-ffmpeg.txt -Encoding utf8
+          $cfg = (& build\ffmpeg\ffmpeg.exe -hide_banner -buildconf 2>&1) -join "`n"
+          if ($cfg -match "enable-gpl") { throw "This ffmpeg build is GPL, not LGPL. Not shipping it." }
+          if ($cfg -notmatch "enable-libmp3lame") { throw "This ffmpeg build cannot write MP3 (no libmp3lame)." }
+          $filters = (& build\ffmpeg\ffmpeg.exe -hide_banner -filters 2>&1) -join "`n"
+          foreach ($f in "silencedetect","aselect","acompressor","alimiter","dynaudnorm","atrim","concat") {
+              if ($filters -notmatch "\s$f\s") { throw "ffmpeg is missing the $f filter." }
+          }
+          & build\ffmpeg\ffmpeg.exe -v error -y -f lavfi -i "sine=d=2" -c:a libmp3lame -b:a 192k "$env:RUNNER_TEMP\t.mp3"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg could not write a test MP3." }
+          Get-ChildItem build\ffmpeg | Select-Object Name, Length
+
+      - name: Collect the third-party licenses
+        shell: pwsh
+        run: |
+          python tools/third_party_licenses.py build\licenses\THIRD-PARTY-LICENSES.txt
+          if (-not (Select-String -Path build\licenses\THIRD-PARTY-LICENSES.txt -Pattern "faster-whisper" -Quiet)) { throw "The license list is missing faster-whisper." }
+
+      - name: Build the installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DAppVersion=$env:CRS_VERSION" installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
+          Get-Item dist\ChurchRadio-Studio-Setup.exe | Select-Object Name, @{n='SizeMB';e={[math]::Round($_.Length/1MB,2)}}
+
+      # ------------------------------------------------------------------
+      # Smoke test the INSTALLED app: run the installer silently (for the current user, as a
+      # church volunteer would), then run the installed program in --selftest mode. It must
+      # find the ffmpeg that was installed with it, keep its files in %APPDATA%, and download
+      # the speech models ONCE to the shared ProgramData folder (run 2 loads them from disk).
+      # ------------------------------------------------------------------
+      - name: Install and smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dir = Join-Path $env:RUNNER_TEMP "crs-install"
+          $p = Start-Process -FilePath dist\ChurchRadio-Studio-Setup.exe -Wait -PassThru -ArgumentList `
+              "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`"", "/LOG=`"$env:RUNNER_TEMP\setup.log`""
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup.log" | Write-Host; throw "Installer failed ($($p.ExitCode))." }
+          $exe = Join-Path $dir "ChurchRadio-Studio.exe"
+          if (-not (Test-Path $exe)) { throw "Installed program not found at $exe" }
+          if (-not (Test-Path (Join-Path $dir "ffmpeg\ffmpeg.exe"))) { throw "ffmpeg was not installed." }
+          foreach ($f in "licenses\LICENSE.txt", "licenses\THIRD-PARTY-LICENSES.txt") {
+              if (-not (Test-Path (Join-Path $dir $f))) { throw "$f was not installed." }
+          }
+
+          function Invoke-Selftest { $out = @(); & $exe --selftest 2>&1 | ForEach-Object { $out += [string]$_ }; $out | Write-Host; return ($out -join "`n") }
+
+          Write-Host "=== Selftest run 1 (first start: models download once) ==="
+          $o1 = Invoke-Selftest
+          if ($o1 -notmatch "selftest: OK") { throw "Selftest run 1 failed." }
+          if ($o1 -notmatch [regex]::Escape("version $env:CRS_VERSION")) { throw "The app does not know its version ($env:CRS_VERSION)." }
+          if ($o1 -notmatch [regex]::Escape("ffmpeg = $dir\ffmpeg\ffmpeg.exe")) { throw "The app did not use the ffmpeg installed with it." }
+          if ($o1 -notmatch [regex]::Escape("data dir = $env:APPDATA\ChurchRadio Studio")) { throw "The app does not keep its files in %APPDATA%." }
+          if (-not (Test-Path "$env:APPDATA\ChurchRadio Studio\config.json")) { throw "config.json was not created in %APPDATA%." }
+          if (Test-Path (Join-Path $dir "config.json")) { throw "config.json was written into the program folder." }
+          $models = Join-Path $env:ProgramData "ChurchRadio Studio\models"
+          foreach ($m in @("base.en", "small.en")) {
+              $bins = @(Get-ChildItem -Path (Join-Path $models ("models--Systran--faster-whisper-" + $m)) -Recurse -File -Filter "model.bin" -ErrorAction SilentlyContinue)
+              if ($bins.Count -eq 0) { throw "$m did not download to the shared models folder." }
+          }
+
+          Write-Host "=== Selftest run 2 (models already on disk) ==="
+          $o2 = Invoke-Selftest
+          if ($o2 -notmatch "PRESENT before load" -or $o2 -match "MISSING before load") { throw "Run 2 would download the models again." }
+          if ($o2 -notmatch "selftest: OK") { throw "Selftest run 2 failed." }
+
+          Write-Host "=== Uninstall keeps the user's files ==="
+          $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $un.FullName -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ($p.ExitCode -ne 0) { throw "Uninstall failed ($($p.ExitCode))." }
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "Uninstall left the program behind." }
+          if (-not (Test-Path "$env:APPDATA\ChurchRadio Studio\config.json")) { throw "Uninstall removed the user's settings." }
+          Write-Host "Smoke test PASS: installed, ffmpeg found, files in %APPDATA%, models downloaded once, uninstall keeps settings."
+
+      # ------------------------------------------------------------------
+      # Update test: install the PREVIOUS release (it may still be called KNAF Broadcast Builder),
+      # give it settings, then run this installer over it. The update must replace the old
+      # program file and shortcuts, keep the install folder, and the app must carry the old
+      # settings folder over. Skipped when the repository has no earlier installer release.
+      # ------------------------------------------------------------------
+      - name: Update test (previous release -> this build)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prev = Join-Path $env:RUNNER_TEMP "prev"
+          New-Item -ItemType Directory -Force -Path $prev | Out-Null
+          $tags = @(gh release list --repo $env:GITHUB_REPOSITORY --limit 20 --json tagName --jq '.[].tagName')
+          $old = $null
+          foreach ($t in $tags) {
+              gh release download $t --repo $env:GITHUB_REPOSITORY --dir $prev --pattern "*-Setup.exe" --clobber 2>$null
+              $old = Get-ChildItem $prev -Filter "*-Setup.exe" | Select-Object -First 1
+              if ($old) { Write-Host "Previous installer: $t $($old.Name)"; break }
+          }
+          if (-not $old) { Write-Host "No earlier installer release: update test skipped."; exit 0 }
+
+          $dir = Join-Path $env:RUNNER_TEMP "upgrade-install"
+          $p = Start-Process -FilePath $old.FullName -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`""
+          if ($p.ExitCode -ne 0) { throw "The previous installer failed ($($p.ExitCode))." }
+          $programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+          $oldExe = Get-ChildItem $dir -Filter "*.exe" | Where-Object { $_.Name -notlike "unins*" } | Select-Object -First 1
+          Write-Host "Previous program: $($oldExe.Name)"
+
+          # Settings as an earlier version would have them (old and new folder names).
+          Remove-Item "$env:APPDATA\ChurchRadio Studio" -Recurse -Force -ErrorAction SilentlyContinue
+          $oldData = if ($oldExe.Name -like "KNAF*") { "$env:APPDATA\KNAF Broadcast Builder" } else { "$env:APPDATA\ChurchRadio Studio" }
+          New-Item -ItemType Directory -Force -Path $oldData | Out-Null
+          Set-Content (Join-Path $oldData "songs.csv") "file,title`nmarker.mp3,Update test marker" -Encoding utf8
+          Set-Content (Join-Path $oldData "config.json") '{"setup_done": true, "broadcast_name": "KNAF"}' -Encoding utf8
+
+          # Update with this build, as a volunteer would: no folder given, the installer finds the old one.
+          $p = Start-Process -FilePath dist\ChurchRadio-Studio-Setup.exe -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/LOG=`"$env:RUNNER_TEMP\update.log`""
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\update.log" | Write-Host; throw "Update failed ($($p.ExitCode))." }
+          $exe = Join-Path $dir "ChurchRadio-Studio.exe"
+          if (-not (Test-Path $exe)) { throw "The update did not install into the existing folder $dir." }
+          if (Test-Path (Join-Path $dir "KNAF-Broadcast-Builder.exe")) { throw "The old KNAF-Broadcast-Builder.exe was left behind." }
+          if (Test-Path (Join-Path $programs "KNAF Broadcast Builder")) { throw "The old Start-menu shortcut was left behind." }
+          if (-not (Test-Path (Join-Path $programs "ChurchRadio Studio\ChurchRadio Studio.lnk"))) { throw "No ChurchRadio Studio Start-menu shortcut." }
+
+          $out = (& $exe --selftest 2>&1 | ForEach-Object { [string]$_ }) -join "`n"
+          Write-Host $out
+          if ($out -notmatch "selftest: OK") { throw "Selftest after the update failed." }
+          $songs = Join-Path $env:APPDATA "ChurchRadio Studio\songs.csv"
+          if (-not (Test-Path $songs) -or ((Get-Content $songs -Raw) -notmatch "Update test marker")) { throw "The song list was not carried over." }
+          $cfg = Get-Content (Join-Path $env:APPDATA "ChurchRadio Studio\config.json") -Raw | ConvertFrom-Json
+          if ($cfg.broadcast_name -ne "KNAF") { throw "The settings were not carried over." }
+
+          $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
+          Start-Process -FilePath $un.FullName -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" | Out-Null
+          Write-Host "Update test PASS: updated in place, old program and shortcuts replaced, settings and song list carried over."
+
+      - name: SHA-256 checksum
+        shell: pwsh
+        run: |
+          Get-FileHash dist\ChurchRadio-Studio-Setup.exe -Algorithm SHA256 | ForEach-Object {
+              "$($_.Hash)  ChurchRadio-Studio-Setup.exe" | Set-Content dist\SHA256SUMS.txt -Encoding ascii
+          }
+          Get-Content dist\SHA256SUMS.txt
+
+      - name: Upload the installer as artifact (for pre-release inspection)
+        uses: actions/upload-artifact@v4
+        with:
+          name: churchradio-studio-setup
+          path: |
+            dist/ChurchRadio-Studio-Setup.exe
+            dist/SHA256SUMS.txt
+          retention-days: 30
+
+      # Release step runs ONLY for dispatch / tag pushes, never for a PR.
+      - name: Create tag + GitHub release with the installer
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = $env:CRS_TAG
+          if (-not $tag) { throw "No tag/version determined. Provide one (e.g. v1.0.0)." }
+
+          # Never force-move an existing tag that points at a different commit.
+          if (git rev-parse -q --verify "refs/tags/$tag" 2>$null) {
+              $existing = git rev-list -n1 "refs/tags/$tag"
+              if ($existing -ne $env:GITHUB_SHA) {
+                  throw "Tag $tag already exists at $existing, not at $env:GITHUB_SHA. Refusing to move it."
+              }
+          } else {
+              git tag $tag
+              git push origin $tag
+          }
+
+          $assets = @("dist/ChurchRadio-Studio-Setup.exe", "dist/SHA256SUMS.txt")
+          $release = gh release view $tag --json url 2>$null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create $tag --title $tag --notes "ChurchRadio Studio $tag" --target $env:GITHUB_SHA
+          }
+          foreach ($a in $assets) {
+              gh release upload $tag $a --clobber
+          }
+          gh release view $tag --json url,name,assets

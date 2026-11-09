@@ -1,0 +1,38 @@
+# Python build files
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv*
+.pytest_cache/
+
+# Environment and secrets (never commit keys, tokens or passwords)
+.env
+.env.*
+*.json.secret
+client_secret*.json
+token*.json
+*.secret
+
+# Speech models (downloaded at run time, about 140 MB + 480 MB)
+models/
+
+# ffmpeg binaries (about 90 MB each, not in git)
+ffmpeg*.exe
+ffprobe*.exe
+
+# Audio / video files (source recordings and outputs)
+*.wav
+*.mp3
+*.mkv
+*.mp4
+*.m4a
+
+# App runtime output
+history.json
+end_words.txt
+
+# Build output (PyInstaller, Inno Setup, ffmpeg download)
+build/
+dist/
+version.txt

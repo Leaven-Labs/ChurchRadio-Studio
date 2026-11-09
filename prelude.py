@@ -295,22 +295,11 @@ def fixed_models_dir():
 
     On Windows: ``C:\\ProgramData\\ChurchRadio Studio\\models``.
     Elsewhere: ``~/.cache/churchradio-studio/models``. Created on first use.
-    A PC that already has the models from the earlier name (KNAF Broadcast Builder) keeps using
-    that folder, so the 620 MB are not downloaded or copied again.
     """
-    from paths import APP_NAME, APP_SLUG, LEGACY_NAMES, LEGACY_SLUGS
+    from paths import APP_NAME, APP_SLUG
     if platform.system() == "Windows":
-        root = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
-        names = (APP_NAME,) + LEGACY_NAMES
-    else:
-        root = os.path.join(os.path.expanduser("~"), ".cache")
-        names = (APP_SLUG,) + LEGACY_SLUGS
-    new = os.path.join(root, names[0], "models")
-    if not os.path.isdir(new):
-        for old in names[1:]:
-            if os.path.isdir(os.path.join(root, old, "models")):
-                return os.path.join(root, old, "models")
-    return new
+        return os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), APP_NAME, "models")
+    return os.path.join(os.path.expanduser("~"), ".cache", APP_SLUG, "models")
 
 
 def _app_base_dir():

@@ -193,10 +193,9 @@ jobs:
           Write-Host "Smoke test PASS: installed, ffmpeg found, files in %APPDATA%, models downloaded once, uninstall keeps settings."
 
       # ------------------------------------------------------------------
-      # Update test: install the PREVIOUS release (it may still be called KNAF Broadcast Builder),
-      # give it settings, then run this installer over it. The update must replace the old
-      # program file and shortcuts, keep the install folder, and the app must carry the old
-      # settings folder over. Skipped when the repository has no earlier installer release.
+      # Update test: install the PREVIOUS release, give it settings, then run this installer
+      # over it. The update must keep the install folder, the shortcuts, the settings and the
+      # song list. Skipped when the repository has no earlier installer release.
       # ------------------------------------------------------------------
       - name: Update test (previous release -> this build)
         shell: pwsh
@@ -222,20 +221,18 @@ jobs:
           $oldExe = Get-ChildItem $dir -Filter "*.exe" | Where-Object { $_.Name -notlike "unins*" } | Select-Object -First 1
           Write-Host "Previous program: $($oldExe.Name)"
 
-          # Settings as an earlier version would have them (old and new folder names).
-          Remove-Item "$env:APPDATA\ChurchRadio Studio" -Recurse -Force -ErrorAction SilentlyContinue
-          $oldData = if ($oldExe.Name -like "KNAF*") { "$env:APPDATA\KNAF Broadcast Builder" } else { "$env:APPDATA\ChurchRadio Studio" }
+          # Settings as the previous version would have them.
+          $oldData = "$env:APPDATA\ChurchRadio Studio"
+          Remove-Item $oldData -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $oldData | Out-Null
           Set-Content (Join-Path $oldData "songs.csv") "file,title`nmarker.mp3,Update test marker" -Encoding utf8
-          Set-Content (Join-Path $oldData "config.json") '{"setup_done": true, "broadcast_name": "KNAF"}' -Encoding utf8
+          Set-Content (Join-Path $oldData "config.json") '{"setup_done": true, "broadcast_name": "Update Test"}' -Encoding utf8
 
           # Update with this build, as a volunteer would: no folder given, the installer finds the old one.
           $p = Start-Process -FilePath dist\ChurchRadio-Studio-Setup.exe -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/LOG=`"$env:RUNNER_TEMP\update.log`""
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\update.log" | Write-Host; throw "Update failed ($($p.ExitCode))." }
           $exe = Join-Path $dir "ChurchRadio-Studio.exe"
           if (-not (Test-Path $exe)) { throw "The update did not install into the existing folder $dir." }
-          if (Test-Path (Join-Path $dir "KNAF-Broadcast-Builder.exe")) { throw "The old KNAF-Broadcast-Builder.exe was left behind." }
-          if (Test-Path (Join-Path $programs "KNAF Broadcast Builder")) { throw "The old Start-menu shortcut was left behind." }
           if (-not (Test-Path (Join-Path $programs "ChurchRadio Studio\ChurchRadio Studio.lnk"))) { throw "No ChurchRadio Studio Start-menu shortcut." }
 
           $out = (& $exe --selftest 2>&1 | ForEach-Object { [string]$_ }) -join "`n"
@@ -244,11 +241,11 @@ jobs:
           $songs = Join-Path $env:APPDATA "ChurchRadio Studio\songs.csv"
           if (-not (Test-Path $songs) -or ((Get-Content $songs -Raw) -notmatch "Update test marker")) { throw "The song list was not carried over." }
           $cfg = Get-Content (Join-Path $env:APPDATA "ChurchRadio Studio\config.json") -Raw | ConvertFrom-Json
-          if ($cfg.broadcast_name -ne "KNAF") { throw "The settings were not carried over." }
+          if ($cfg.broadcast_name -ne "Update Test") { throw "The settings were not carried over." }
 
           $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
           Start-Process -FilePath $un.FullName -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" | Out-Null
-          Write-Host "Update test PASS: updated in place, old program and shortcuts replaced, settings and song list carried over."
+          Write-Host "Update test PASS: updated in place, shortcut, settings and song list kept."
 
       - name: SHA-256 checksum
         shell: pwsh

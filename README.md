@@ -331,7 +331,6 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | `ChurchRadio-Studio.spec` | PyInstaller recipe. |
 | `installer.iss` | Inno Setup recipe for the installer. |
 | `ChurchRadio Studio.bat` | Starts the app from the source code on Windows. |
-| `docs/` | Project notes. |
 | `tools/third_party_licenses.py` | Collects the third-party licenses for the installer. |
 | `LICENSE` | The MIT License. |
 | `tests/test_core.py` | The tests. |

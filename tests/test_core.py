@@ -48,7 +48,7 @@ class ChurchYear(unittest.TestCase):
         self.assertIsNone(cy.date_from_filename("service.mkv"))
 
     def test_guess(self):
-        self.assertEqual(cy.guess_seasons(r"C:\KNAF Songs #1\O Come O Come Emmanuel (Advent).mp3"), {"advent"})
+        self.assertEqual(cy.guess_seasons(r"C:\Church Songs #1\O Come O Come Emmanuel (Advent).mp3"), {"advent"})
         self.assertEqual(cy.guess_seasons("Christmas/Joy to the World.mp3"), {"christmas"})
         self.assertEqual(cy.guess_seasons("A Mighty Fortress.mp3"), set())
         self.assertEqual(cy.guess_seasons("Christmas - Silent Night.mp3"), {"christmas"})
@@ -590,41 +590,14 @@ class Paths(unittest.TestCase):
             with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": os.path.join(d, "mine")}):
                 self.assertEqual(paths.data_dir(), os.path.join(d, "mine"))
                 self.assertTrue(os.path.isdir(os.path.join(d, "mine")))
-            env = {"CHURCHRADIO_DATA_DIR": "", "KNAF_DATA_DIR": "", "APPDATA": os.path.join(d, "Roaming")}
+            env = {"CHURCHRADIO_DATA_DIR": "", "APPDATA": os.path.join(d, "Roaming")}
             with mock.patch.dict(os.environ, env), mock.patch.object(paths.sys, "platform", "win32"):
                 self.assertEqual(paths.data_dir(), os.path.join(d, "Roaming", "ChurchRadio Studio"))
 
-    def test_old_knaf_folder_is_carried_over_once(self):
-        with tempfile.TemporaryDirectory() as d:
-            roaming = os.path.join(d, "Roaming")
-            old = os.path.join(roaming, "KNAF Broadcast Builder")
-            os.makedirs(old)
-            for n, text in (("config.json", '{"broadcast_name": "KNAF"}'), ("songs.csv", "file,title\n")):
-                with open(os.path.join(old, n), "w") as fh:
-                    fh.write(text)
-            env = {"CHURCHRADIO_DATA_DIR": "", "KNAF_DATA_DIR": "", "APPDATA": roaming}
-            with mock.patch.dict(os.environ, env), mock.patch.object(paths.sys, "platform", "win32"):
-                new = paths.data_dir()
-                self.assertEqual(new, os.path.join(roaming, "ChurchRadio Studio"))
-                self.assertEqual(sorted(os.listdir(new)), ["config.json", "songs.csv"])
-                with open(os.path.join(new, "songs.csv"), "w") as fh:
-                    fh.write("changed in the new version")
-                with open(os.path.join(old, "history.json"), "w") as fh:
-                    fh.write("[]")
-                paths.data_dir()  # the new folder exists now: nothing is copied again
-                self.assertNotIn("history.json", os.listdir(new))
-                with open(os.path.join(new, "songs.csv")) as fh:
-                    self.assertEqual(fh.read(), "changed in the new version")
-            self.assertTrue(os.path.isfile(os.path.join(old, "config.json")))  # the old folder is kept
-
-    def test_models_already_on_the_pc_are_used_where_they_are(self):
+    def test_models_folder_on_windows(self):
         with tempfile.TemporaryDirectory() as d:
             with mock.patch.dict(os.environ, {"PROGRAMDATA": d}), \
                     mock.patch.object(prelude.platform, "system", return_value="Windows"):
-                self.assertEqual(prelude.fixed_models_dir(), os.path.join(d, "ChurchRadio Studio", "models"))
-                os.makedirs(os.path.join(d, "KNAF Broadcast Builder", "models"))
-                self.assertEqual(prelude.fixed_models_dir(), os.path.join(d, "KNAF Broadcast Builder", "models"))
-                os.makedirs(os.path.join(d, "ChurchRadio Studio", "models"))
                 self.assertEqual(prelude.fixed_models_dir(), os.path.join(d, "ChurchRadio Studio", "models"))
 
     def test_user_files_go_to_the_data_folder(self):
@@ -832,32 +805,10 @@ except ImportError:  # pragma: no cover
 
 
 @unittest.skipIf(setup_wizard is None, "tkinter not installed")
-class SetupWizardHelpers(unittest.TestCase):
-    def test_old_settings_win_but_new_settings_stay(self):
-        new = {"setup_done": False, "broadcast_name": "KNAF", "intro": "", "end_answer_phrase": "Thanks be to God"}
-        old = {"intro": r"C:\Music\Intro.mp3", "song_folders": ["A"], "setup_done": True}
-        m = setup_wizard.merge_old_config(new, old)
-        self.assertEqual(m["intro"], r"C:\Music\Intro.mp3")
-        self.assertEqual(m["end_answer_phrase"], "Thanks be to God")  # kept: not in the old file
-        self.assertFalse(m["setup_done"])                              # the wizard still finishes
-
-    def test_import_old_files(self):
-        with tempfile.TemporaryDirectory() as d:
-            old, data = os.path.join(d, "old"), os.path.join(d, "data")
-            os.makedirs(old)
-            os.makedirs(data)
-            for n in ("songs.csv", "history.json"):
-                with open(os.path.join(old, n), "w") as fh:
-                    fh.write("old " + n)
-            with open(os.path.join(data, "songs.csv"), "w") as fh:
-                fh.write("mine")
-            asked = []
-            copied = setup_wizard.import_old_files(old, data, lambda n: asked.append(n) or False)
-            self.assertEqual(copied, ["history.json"])
-            self.assertEqual(asked, ["songs.csv"])
-            with open(os.path.join(data, "songs.csv")) as fh:
-                self.assertEqual(fh.read(), "mine")  # not replaced: the person said no
-            self.assertEqual(setup_wizard.import_old_files(old, data, lambda n: True), ["songs.csv", "history.json"])
+class SetupWizardModule(unittest.TestCase):
+    def test_pages(self):
+        self.assertTrue(callable(setup_wizard.SetupWizard.page_welcome))
+        self.assertFalse(hasattr(setup_wizard.SetupWizard, "import_old"))
 
 
 class SaveConfig(unittest.TestCase):

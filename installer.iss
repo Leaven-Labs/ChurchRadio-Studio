@@ -14,15 +14,9 @@
 ; folder: they live in %APPDATA%\ChurchRadio Studio, and the speech models in
 ; C:\ProgramData\ChurchRadio Studio\models. Uninstalling leaves both, so a reinstall or an
 ; update keeps everything.
-;
-; The app was called "KNAF Broadcast Builder" up to version 1.2. The AppId is the same, so this
-; installer updates that installation in place (in its folder), replaces the old program file and
-; its Start-menu and desktop shortcuts, and the app copies the old settings folder on first start.
 
 #define AppName "ChurchRadio Studio"
 #define AppExe "ChurchRadio-Studio.exe"
-#define OldName "KNAF Broadcast Builder"
-#define OldExe "KNAF-Broadcast-Builder.exe"
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -67,10 +61,6 @@ Source: "build\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 [InstallDelete]
 ; An update replaces the whole program folder content (old libraries never mix with new ones).
 Type: filesandordirs; Name: "{app}\_internal"
-; Updating from KNAF Broadcast Builder: remove the old program file and its shortcuts.
-Type: files; Name: "{app}\{#OldExe}"
-Type: filesandordirs; Name: "{autoprograms}\{#OldName}"
-Type: files; Name: "{autodesktop}\{#OldName}.lnk"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

@@ -2,13 +2,10 @@
 
 It asks for everything that is particular to a church: the broadcast name and length, the intro,
 the song folders, the words that start and end the service, the patriotic holidays, and it can
-download the speech models. It can also import the settings of an earlier version (the
-config.json, songs.csv and history.json that sat next to the old single .exe).
+download the speech models.
 Everything is saved to the user's config.json (builder.save_config).
 """
-import json
 import os
-import shutil
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -22,7 +19,6 @@ AUDIO = (("Audio files", "*.mp3 *.wav *.m4a *.flac *.ogg *.wma *.aac"), ("All fi
 HOLIDAY_LABELS = {"memorial": "Memorial Day", "independence": "Independence Day (July 4)",
                   "veterans": "Veterans Day", "labor": "Labor Day"}
 MODELS_MB = 620  # base.en + small.en, about
-USER_FILES = ("config.json", "songs.csv", "history.json")
 
 
 def folder_size_mb(folder):
@@ -35,28 +31,6 @@ def folder_size_mb(folder):
                 pass
     return total / 1e6
 
-
-def merge_old_config(cfg, old):
-    """Settings from an earlier version win over the defaults; new settings keep their default."""
-    out = dict(cfg)
-    out.update({k: v for k, v in old.items() if k != "setup_done"})
-    return out
-
-
-def import_old_files(folder, data_dir, overwrite):
-    """Copy songs.csv / history.json from an earlier version's folder into the user's folder.
-    overwrite(name) -> bool is asked when the user's folder already has that file.
-    Returns the names copied."""
-    copied = []
-    for name in USER_FILES[1:]:
-        src, dst = os.path.join(folder, name), os.path.join(data_dir, name)
-        if not os.path.isfile(src) or os.path.abspath(src) == os.path.abspath(dst):
-            continue
-        if os.path.exists(dst) and os.path.getsize(dst) > 0 and not overwrite(name):
-            continue
-        shutil.copyfile(src, dst)
-        copied.append(name)
-    return copied
 
 
 class SetupWizard:
@@ -178,35 +152,6 @@ class SetupWizard:
                      "your intro, the service (with the organ prelude and the end cut off), and songs "
                      "that fill the time. These few steps set it up for your church. You can change "
                      "everything later with the Settings... button.")
-        box = ttk.LabelFrame(self.body, text="Used KNAF Broadcast Builder 1.1 (the single .exe)?")
-        box.pack(fill="x", pady=10)
-        ttk.Label(box, text="Choose the folder that held KNAF-Broadcast-Builder.exe. Its "
-                            "settings, song list and history are copied in, and the next steps show them.",
-                  wraplength=600, justify="left").pack(anchor="w", padx=10, pady=(6, 4))
-        ttk.Button(box, text="Import settings from a folder...", command=self.import_old).pack(anchor="w", padx=10, pady=(0, 10))
-        self.import_note = ttk.Label(box, text="", foreground="#1a6b1a")
-        self.import_note.pack(anchor="w", padx=10, pady=(0, 6))
-
-    def import_old(self):
-        folder = filedialog.askdirectory(parent=self.win, title="Folder of the earlier version")
-        if not folder:
-            return
-        cfg_path = os.path.join(folder, "config.json")
-        if not os.path.isfile(cfg_path):
-            messagebox.showerror("Import", "There is no config.json in that folder.", parent=self.win)
-            return
-        try:
-            with open(cfg_path, encoding="utf-8-sig") as fh:
-                old = json.load(fh)
-        except (OSError, ValueError) as e:
-            messagebox.showerror("Import", f"Could not read config.json:\n{e}", parent=self.win)
-            return
-        self.cfg = merge_old_config(self.cfg, old)
-        copied = import_old_files(folder, builder.data_dir(), lambda n: messagebox.askyesno(
-            "Import", f"Replace the {n} you already have with the one from that folder?", parent=self.win))
-        self.make_vars()
-        self.import_note.config(text="Imported: config.json" + "".join(", " + n for n in copied) +
-                                ". Check the next steps, then Finish.")
 
     def page_broadcast(self):
         self.heading("Your broadcast", "The name is used for the MP3 file and its title, "

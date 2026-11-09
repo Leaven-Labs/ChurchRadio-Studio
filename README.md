@@ -28,7 +28,7 @@ Everything runs **on your own PC**. The speech recognition is downloaded once an
 offline; nothing about your services or songs is sent anywhere.
 
 ChurchRadio Studio was created by **Aaron Steger** for **Bethany Lutheran Church** in
-Fredericksburg, Texas, and its weekly **KNAF** radio broadcast, and is shared so other congregations
+Fredericksburg, Texas, and its weekly radio broadcast, and is shared so other congregations
 can use it too. It is free software under the [MIT License](LICENSE). It was developed with the help
 of [Claude Code](https://claude.com/claude-code).
 
@@ -43,7 +43,7 @@ of [Claude Code](https://claude.com/claude-code).
 - [Your songs](#your-songs)
 - [Settings](#settings)
 - [Where your files are](#where-your-files-are)
-- [Updating, and moving from KNAF Broadcast Builder](#updating-and-moving-from-knaf-broadcast-builder)
+- [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
 - [For developers](#for-developers)
 - [Third-party software](#third-party-software)
@@ -72,8 +72,7 @@ The first start needs **internet once** to download the two speech-recognition m
 The first time the app opens, a short wizard sets it up for your church. You can change all of it
 later with the **Settings...** button.
 
-1. **Welcome** — coming from *KNAF Broadcast Builder 1.1* (the single `.exe`)? Import its settings,
-   song list and history here.
+1. **Welcome** — what the wizard will ask for.
 2. **Broadcast** — your station's or program's name (used for the MP3 file name, e.g.
    `St. John Radio 2026-11-15.mp3`), the broadcast length, how far over it may run, and where to
    save the MP3 (empty = next to the service recording).
@@ -250,19 +249,11 @@ To open your settings folder, paste `%APPDATA%\ChurchRadio Studio` into the File
 Uninstalling removes only the program; your settings and the models stay, so a reinstall carries on
 where you left off.
 
-## Updating, and moving from KNAF Broadcast Builder
+## Updating
 
-**To update**, download the newest `ChurchRadio-Studio-Setup.exe` and run it. It replaces the program
-and keeps your settings, songs and history.
-
-ChurchRadio Studio used to be called **KNAF Broadcast Builder**.
-
-- **From version 1.2 (installed with a Setup.exe):** just run the new installer. It updates the
-  existing installation, replaces the old shortcuts, and the first start copies your settings, song
-  list and history from `%APPDATA%\KNAF Broadcast Builder`. The speech models already on the PC are
-  used where they are — nothing is downloaded again.
-- **From version 1.1 (the single `.exe`):** install, then on the setup wizard's first page click
-  **Import settings from a folder...** and choose the folder with `KNAF-Broadcast-Builder.exe`.
+Download the newest `ChurchRadio-Studio-Setup.exe` from the **[Releases](../../releases)** page and run
+it. It updates the existing installation and keeps your settings, songs and history. The speech models
+already on the PC are used where they are — nothing is downloaded again.
 
 ## Troubleshooting
 
@@ -301,7 +292,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-ffmpeg must be available: in an `ffmpeg` folder next to the code, next to the code, on `PATH`, or in
+ffmpeg must be available: in an `ffmpeg` folder next to the code, on `PATH`, or in
 `C:\ffmpeg\bin`. Set the environment variable `CHURCHRADIO_DATA_DIR` to keep the settings in a test
 folder instead of your real one.
 
@@ -323,7 +314,7 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | File | What it is |
 |---|---|
 | `app.py` | The main window. |
-| `setup_wizard.py` | The setup wizard, also used by Settings.... |
+| `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
 | `songs_window.py` | The Songs window. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
 | `builder.py` | Makes one broadcast: intro + service + songs. |
@@ -340,7 +331,7 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | `ChurchRadio-Studio.spec` | PyInstaller recipe. |
 | `installer.iss` | Inno Setup recipe for the installer. |
 | `ChurchRadio Studio.bat` | Starts the app from the source code on Windows. |
-| `docs/` | Notes, such as Bethany's song-catalog findings. |
+| `docs/` | Project notes. |
 | `tools/third_party_licenses.py` | Collects the third-party licenses for the installer. |
 | `LICENSE` | The MIT License. |
 | `tests/test_core.py` | The tests. |
@@ -370,6 +361,6 @@ it.
 
 Copyright (c) 2026 **Aaron Steger**.
 
-Created by Aaron Steger for Bethany Lutheran Church, Fredericksburg, Texas, and its KNAF radio
+Created by Aaron Steger for Bethany Lutheran Church, Fredericksburg, Texas, and its radio
 broadcast. Developed with the help of Claude Code. The app's **About** box shows the author, the
 version and the license.

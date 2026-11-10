@@ -1,6 +1,5 @@
 """Find where a spoken phrase (default "Good morning") starts, to cut the prelude before it.
 
-Copied from Silence Trimmer (same rules), so the builder cuts the start the same way.
 Uses faster-whisper speech recognition on the start of the file. The models live in a
 fixed folder per PC (``C:\\ProgramData\\ChurchRadio Studio\\models`` on Windows);
 ``models_folder`` in config.json overrides that. On first run the models are downloaded

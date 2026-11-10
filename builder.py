@@ -1,4 +1,4 @@
-"""Build one broadcast: intro + trimmed service + songs that fill the time = one MP3."""
+"""Build one broadcast: intro + the service (prelude, end and long silences cut) + songs that fill the time = one MP3."""
 import datetime as dt
 import json
 import os
@@ -12,7 +12,6 @@ import churchyear
 import picker
 import prelude
 
-TRIMMED_SUFFIXES = ("_trimmed.wav",)
 DEFAULT_NAME = "Church Radio"  # used in the MP3 name until the setup wizard sets broadcast_name
 
 
@@ -103,7 +102,7 @@ def save_history(date, songs, output):
 
 
 def find_service_start(service, cfg, mode, log=print):
-    """Seconds to skip at the start of the service (organ prelude), as Silence Trimmer does."""
+    """Seconds to skip at the start of the service (the organ prelude)."""
     phrase = cfg.get("start_phrase", "Good morning").strip()
     if mode == "Keep start" or not phrase:
         log("Service start: nothing cut at the start.")
@@ -192,18 +191,14 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
     out = os.path.join(out_dir, output_name(cfg, date))
 
     with tempfile.TemporaryDirectory(prefix="churchradio_") as tmp:
-        if service.lower().endswith(TRIMMED_SUFFIXES):
-            log("File is already trimmed by Silence Trimmer. Using it as it is.")
-            svc, svc_len = service, audio.duration(service)
-        else:
-            start = find_service_start(service, cfg, start_mode or cfg.get("service_start", "Auto"), log)
-            end = find_service_end(service, cfg, start, log) if cut_end else None
-            if not cut_end:
-                log("Service end: nothing cut at the end.")
-            log("Cutting long silences from the service ...")
-            svc = os.path.join(tmp, "service.wav")
-            svc_len = audio.trim_service(service, svc, cfg.get("max_silence_seconds", 5),
-                                         cfg.get("silence_level_db", -40), log, start, end)
+        start = find_service_start(service, cfg, start_mode or cfg.get("service_start", "Auto"), log)
+        end = find_service_end(service, cfg, start, log) if cut_end else None
+        if not cut_end:
+            log("Service end: nothing cut at the end.")
+        log("Cutting long silences from the service ...")
+        svc = os.path.join(tmp, "service.wav")
+        svc_len = audio.trim_service(service, svc, cfg.get("max_silence_seconds", 5),
+                                     cfg.get("silence_level_db", -40), log, start, end)
         trim = cfg.get("trim_song_silence", True)
         silence_db = cfg.get("song_silence_db", audio.EDGE_SILENCE_DB)
         svc_end = svc_len

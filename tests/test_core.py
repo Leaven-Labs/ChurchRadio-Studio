@@ -336,8 +336,6 @@ class Compression(unittest.TestCase):
 
 
 class Prelude(unittest.TestCase):
-    """Same rules as Silence Trimmer."""
-
     def test_phrase(self):
         words = [("Look", 1.0), (" Good", 330.0), (" morning,", 330.1), ("good", 400.0), ("morning", 400.2)]
         self.assertEqual(prelude.match_phrase(words, "Good morning"), 330.0)
@@ -825,11 +823,12 @@ class SaveConfig(unittest.TestCase):
         if not _has_ffmpeg():
             self.skipTest("ffmpeg not installed")
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": d}):
-            svc = os.path.join(d, "service_trimmed.wav")
+            svc = os.path.join(d, "service.wav")
             _tone(svc, [("tone", 3)])
             cfg = {"intro": "", "song_folders": [], "output_folder": d, "target_minutes": 5,
                    "compression": {"enabled": False}, "broadcast_name": "Test"}
-            out = builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lambda m: None)
+            out = builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lambda m: None,
+                                start_mode="Keep start", cut_end=False)
             self.assertEqual(os.path.basename(out), "Test 2026-11-15.mp3")
             self.assertAlmostEqual(audio.duration(out), 3.0, delta=0.3)
 

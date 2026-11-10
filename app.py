@@ -80,7 +80,7 @@ class App:
         root.title(paths.APP_NAME)
         set_icon(root)
         root.geometry("760x530")
-        self.drop = tk.Label(root, text="Drop the service file here\n(MKV or trimmed WAV)",
+        self.drop = tk.Label(root, text="Drop the service recording here\n(MKV, MP4, WAV, MP3 or M4A)",
                              relief="ridge", bd=3, height=5, font=("Segoe UI", 14), bg="#eef3fb")
         self.drop.pack(fill="x", padx=12, pady=(12, 6))
         row = ttk.Frame(root)

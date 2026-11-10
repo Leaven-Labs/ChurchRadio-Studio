@@ -34,7 +34,7 @@ def set_icon(win):
         pass  # no icon is better than no window
 
 
-CREDIT = "Created by Aaron Steger."
+CREDIT = "Created by Aaron Steger. Published by Leaven Labs."
 
 
 def about(parent):

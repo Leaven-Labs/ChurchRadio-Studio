@@ -29,8 +29,8 @@ offline; nothing about your services or songs is sent anywhere.
 
 ChurchRadio Studio was created by **Aaron Steger** for **Bethany Lutheran Church** in
 Fredericksburg, Texas, and its weekly radio broadcast, and is shared so other congregations
-can use it too. It is free software under the [MIT License](LICENSE). It was developed with the help
-of [Claude Code](https://claude.com/claude-code).
+can use it too. It is published by [Leaven Labs](https://leavenlabs.org) as free software under the
+[MIT License](LICENSE). It was developed with the help of [Claude Code](https://claude.com/claude-code).
 
 ---
 
@@ -47,6 +47,7 @@ of [Claude Code](https://claude.com/claude-code).
 - [Troubleshooting](#troubleshooting)
 - [For developers](#for-developers)
 - [Third-party software](#third-party-software)
+- [Reporting a security problem](#reporting-a-security-problem)
 - [License and credits](#license-and-credits)
 
 ---
@@ -352,14 +353,18 @@ installed in the program's `licenses` folder (**About → Licenses** in the app)
   **huggingface_hub** and **tokenizers** (Apache 2.0), **ONNX Runtime** (MIT), and their dependencies.
 - **Python** (PSF License) and **Tcl/Tk** (BSD-style), built into the program.
 
+## Reporting a security problem
+
+Please don't open a public issue. See [SECURITY.md](SECURITY.md) for how to report it privately.
+
 ## License and credits
 
 ChurchRadio Studio is free software under the **[MIT License](LICENSE)**: anyone may use, copy, change
 and share it, including for other churches, as long as the copyright notice and license are kept with
 it.
 
-Copyright (c) 2026 **Aaron Steger**.
+Copyright (c) 2026 **Aaron Steger**. Published by **[Leaven Labs](https://leavenlabs.org)**.
 
 Created by Aaron Steger for Bethany Lutheran Church, Fredericksburg, Texas, and its radio
 broadcast. Developed with the help of Claude Code. The app's **About** box shows the author, the
-version and the license.
+publisher, the version and the license.

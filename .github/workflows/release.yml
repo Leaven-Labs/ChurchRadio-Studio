@@ -269,7 +269,8 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 30
 
-      # Release step runs ONLY for dispatch / tag pushes, never for a PR.
+      # Release step runs ONLY for dispatch / tag pushes, never for a PR. The release text is
+      # .github/RELEASE_NOTES.md: update its "What's new" before each release.
       - name: Create tag + GitHub release with the installer
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -294,7 +295,7 @@ jobs:
           $assets = @("dist/ChurchRadio-Studio-Setup.exe", "dist/SHA256SUMS.txt")
           $release = gh release view $tag --json url 2>$null
           if ($LASTEXITCODE -ne 0) {
-              gh release create $tag --title $tag --notes "ChurchRadio Studio $tag" --target $env:GITHUB_SHA
+              gh release create $tag --title "ChurchRadio Studio $tag" --notes-file .github/RELEASE_NOTES.md --target $env:GITHUB_SHA
           }
           foreach ($a in $assets) {
               gh release upload $tag $a --clobber

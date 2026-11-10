@@ -10,6 +10,7 @@ Already installed? Run the new installer: it updates in place and keeps your set
 
 - The main window now lists the formats it accepts: MKV, MP4, WAV, MP3 or M4A.
 - Every service recording is now processed the same way (an old shortcut for pre-trimmed WAV files from a separate tool was removed).
+- Leaven Labs is now shown as the publisher in the installer and the About box.
 - Updates move the program out of an install folder still named after the app's earlier name, into a "ChurchRadio Studio" folder.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the installer's checksum.

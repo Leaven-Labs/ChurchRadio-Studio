@@ -114,6 +114,8 @@ class SongsWindow:
         self.find_btn = ttk.Button(top, text="Look for new songs", command=self.rescan)
         self.find_btn.pack(side="right")
         ttk.Button(top, text="Add songs...", command=self.add_songs).pack(side="right", padx=6)
+        self.import_btn = ttk.Button(top, text="Import list...", command=self.import_list)
+        self.import_btn.pack(side="right")
 
         ttk.Label(w, text="Click On to turn a song on or off. Double-click a title to rename it, "
                           "or Seasons to choose when it plays.").pack(fill="x", padx=10)
@@ -311,6 +313,109 @@ class SongsWindow:
         self.rows = catalog.load(self.path)
         self.fill()
         self.win.grab_set()
+
+    def import_list(self):
+        """Explain the import file, offer the template, then import the file the person picks."""
+        dlg = tk.Toplevel(self.win)
+        dlg.title("Import song list")
+        dlg.transient(self.win)
+        dlg.resizable(False, False)
+        text = ("Add many songs at once, or change their titles, seasons and on/off, from a CSV file "
+                "(Excel: Save As \u2192 CSV).\n\n"
+                "Columns:\n"
+                "  file \u2014 the song's full path, or its file name if it is in one of your song folders\n"
+                "  title \u2014 the song name\n"
+                "  seasons \u2014 advent, christmas, epiphany, lent, holyweek, easter, pentecost or\n"
+                "      patriotic, separated by ; (empty or general = any time of the year)\n"
+                "  enabled \u2014 yes or no\n\n"
+                "For a song already in your list, an empty cell keeps what is there now. "
+                "The song files are not copied: they stay where they are.")
+        ttk.Label(dlg, text=text, justify="left", wraplength=520).pack(anchor="w", padx=14, pady=(14, 10))
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", padx=14, pady=(0, 14))
+
+        def template():
+            from tkinter import filedialog
+            f = filedialog.asksaveasfilename(parent=dlg, title="Save the template", defaultextension=".csv",
+                                             initialfile="song import template.csv",
+                                             filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            if not f:
+                return
+            try:
+                catalog.write_template(f)
+            except OSError as e:
+                messagebox.showerror("Import song list", f"Could not save the template:\n{e}", parent=dlg)
+                return
+            if messagebox.askyesno("Import song list", "Template saved. Replace the example rows with your "
+                                   "songs, save it, then click Import a file....\n\nOpen it now?", parent=dlg):
+                try:
+                    play(f)  # opens it in Excel (or the PC's CSV program)
+                except OSError as e:
+                    messagebox.showerror("Import song list", str(e), parent=dlg)
+
+        def pick():
+            from tkinter import filedialog
+            f = filedialog.askopenfilename(parent=dlg, title="Song list to import",
+                                           filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            if f:
+                dlg.destroy()
+                self.run_import(f)
+
+        ttk.Button(btns, text="Download template...", command=template).pack(side="left")
+        ttk.Button(btns, text="Close", command=dlg.destroy).pack(side="right")
+        ttk.Button(btns, text="Import a file...", command=pick).pack(side="right", padx=6)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.bind("<Destroy>", lambda e: e.widget is dlg and self.win.after_idle(self.regrab))
+        dlg.update_idletasks()
+        dlg.geometry(f"+{self.win.winfo_rootx() + (self.win.winfo_width() - dlg.winfo_width()) // 2}"
+                     f"+{self.win.winfo_rooty() + (self.win.winfo_height() - dlg.winfo_height()) // 3}")
+        dlg.grab_set()
+
+    def regrab(self):
+        """Keep the main window blocked while Songs is open (a box closing frees it)."""
+        if self.win.winfo_exists():
+            self.win.grab_set()
+
+    def run_import(self, import_path):
+        """Import in the background (new songs are measured, which can take a minute)."""
+        self.import_btn.state(["disabled"])
+        self.status.config(text="Importing the song list ...")
+        result = {}
+
+        def work():
+            try:
+                result["out"] = catalog.import_csv(self.path, import_path, self.folders, audio.duration,
+                                                   get_edges=self.get_edges, log=lambda m: None)
+            except (OSError, ValueError, KeyError) as e:
+                result["error"] = str(e)
+
+        def wait():
+            if not self.win.winfo_exists():
+                return
+            if t.is_alive():
+                self.win.after(200, wait)
+                return
+            self.win.grab_set()
+            self.import_btn.state(["!disabled"])
+            if "error" in result:
+                self.status.config(text=self.counts)
+                messagebox.showerror("Import song list", f"Could not import the song list:\n{result['error']}\n\n"
+                                     "If songs.csv is open in Excel, close it and try again.", parent=self.win)
+                return
+            self.rows, added, updated, problems = result["out"]
+            self.fill()
+            msg = f"{added} song(s) added, {updated} updated."
+            self.status.config(text=f"{msg} {self.counts}")
+            if problems:
+                more = f"\n... and {len(problems) - 15} more." if len(problems) > 15 else ""
+                messagebox.showwarning("Import song list", f"{msg}\n\nThese lines were skipped:\n"
+                                       + "\n".join(problems[:15]) + more, parent=self.win)
+            else:
+                messagebox.showinfo("Import song list", msg, parent=self.win)
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        wait()
 
     def rescan(self):
         """Look in the song folders for new songs (reads their lengths; can take a minute)."""

@@ -9,6 +9,9 @@ Columns: file, title, duration, seasons, enabled, words
   when the song is played, so there is no gap between songs (empty = not measured yet).
 New songs found in the song folders are added with a guessed season. The Songs window in
 the app edits this file too.
+
+Import song list (import_csv): a separate CSV, from a template the app saves (write_template),
+adds songs to this list or changes their title, seasons and on/off in one go.
 """
 import csv
 import os
@@ -159,3 +162,136 @@ def songs_for(rows, season, patriotic=False, trim=True):
         out.append({"path": r["file"], "title": r.get("title") or "", "duration": dur - lead - tail,
                     "start": lead, "end": dur - tail if tail else None, "seasonal": bool(tags)})
     return out
+
+
+# ---- import a song list ---------------------------------------------------------------------
+IMPORT_FIELDS = ["file", "title", "seasons", "enabled"]
+TEMPLATE_ROWS = [
+    {"file": r"C:\Church Songs\A Mighty Fortress.mp3", "title": "A Mighty Fortress Is Our God",
+     "seasons": "", "enabled": "yes"},
+    {"file": "Joy to the World.mp3", "title": "Joy to the World", "seasons": "christmas", "enabled": "yes"},
+    {"file": "Were You There.mp3", "title": "Were You There", "seasons": "lent;holyweek", "enabled": "yes"},
+]
+# Season names people may type in the import file, as well as the season words themselves.
+SEASON_ALIASES = {"holy week": "holyweek", "general": "", "any": "", "all": ""}
+YES = ("yes", "y", "1", "true", "on")
+
+
+def write_template(path):
+    """Save a starting import file: the columns and a few example rows to replace."""
+    with open(path, "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=IMPORT_FIELDS)
+        w.writeheader()
+        w.writerows(TEMPLATE_ROWS)
+
+
+def _read_any(path):
+    """Rows of a CSV, with headers made lower case and trimmed (Excel files say 'Title ')."""
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            with open(path, newline="", encoding=enc) as fh:
+                reader = csv.DictReader(fh)
+                rows = [{(k or "").strip().lower(): (v or "").strip() for k, v in r.items()} for r in reader]
+                return [k.strip().lower() for k in (reader.fieldnames or [])], rows
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("The file is not a text CSV file.")
+
+
+def parse_seasons(text):
+    """'Advent; Christmas' or 'lent, holy week' -> 'advent;christmas'. Raises ValueError for an
+    unknown word. Empty or 'General' -> '' (any time)."""
+    tags = []
+    for part in text.replace(",", ";").split(";"):
+        word = " ".join(part.lower().split())
+        if not word:
+            continue
+        tag = SEASON_ALIASES.get(word, word.replace(" ", ""))
+        if tag and tag not in churchyear.SEASONS and tag != churchyear.PATRIOTIC:
+            raise ValueError(f'unknown season "{part.strip()}"')
+        if tag and tag not in tags:
+            tags.append(tag)
+    return ";".join(tags)
+
+
+def _find_file(name, folders):
+    """A full path as it is, else a name (or a path inside a song folder) found in the song folders."""
+    if os.path.isabs(name):
+        return name if os.path.isfile(name) else None
+    for folder in folders:
+        p = os.path.join(folder, name)
+        if os.path.isfile(p):
+            return os.path.normpath(p)
+    want = os.path.basename(name).lower()
+    for f in scan(folders):
+        if os.path.basename(f).lower() == want:
+            return f
+    return None
+
+
+def import_csv(path, import_path, folders, get_duration, get_edges=None, log=print):
+    """Add the songs in import_path to the song list at path, or update them if already there.
+
+    Columns: file (a full path, or a file name in one of the song folders), title, seasons,
+    enabled. For a song already in the list an empty cell keeps what is there now; a new song
+    with no seasons gets them guessed from its file name, as songs found in the folders do.
+    Returns (rows, added, updated, problems): problems are lines for the person to read.
+    """
+    fields, data = _read_any(import_path)
+    if "file" not in fields:
+        raise ValueError('The file has no "file" column. Start from the template (Download template...).')
+    rows = load(path)
+    by_norm = {os.path.normcase(os.path.abspath(k)): k for k in rows}
+    added = updated = 0
+    problems = []
+    for n, r in enumerate(data, start=2):  # line 1 is the header
+        name = r.get("file", "")
+        if not name and not any(r.values()):
+            continue  # an empty line
+        where = f"Line {n}"
+        if not name:
+            problems.append(f"{where}: no file name.")
+            continue
+        found = _find_file(name, folders)
+        if not found:
+            problems.append(f"{where}: song file not found: {name}")
+            continue
+        try:
+            seasons = parse_seasons(r.get("seasons", "")) if r.get("seasons") else None
+        except ValueError as e:
+            problems.append(f"{where}: {e} (use {', '.join(churchyear.SEASONS)}, patriotic or general).")
+            continue
+        enabled = r.get("enabled", "").lower()
+        if enabled and enabled not in YES + OFF:
+            problems.append(f'{where}: enabled must be yes or no, not "{r.get("enabled")}".')
+            continue
+        key = by_norm.get(os.path.normcase(os.path.abspath(found)))
+        if key is None:
+            key = by_norm[os.path.normcase(os.path.abspath(found))] = found
+            rows[key] = {"file": found, "duration": "", "enabled": "yes",
+                         "seasons": ";".join(sorted(churchyear.guess_seasons(found)))}
+            added += 1
+        else:
+            updated += 1
+        row = rows[key]
+        if r.get("title"):
+            row["title"] = r["title"]
+        if seasons is not None:
+            row["seasons"] = seasons
+        if enabled:
+            row["enabled"] = "yes" if enabled in YES else "no"
+        if not row.get("duration"):
+            try:
+                row["duration"] = f"{get_duration(found):.1f}"
+            except Exception as e:  # noqa: BLE001
+                log(f"Cannot read length of {found}: {e}")
+                row["duration"] = "0"
+        if get_edges and not (row.get("start_silence") or "").strip() and _duration(row) > 0:
+            try:
+                lead, tail = get_edges(found)
+                row["start_silence"], row["end_silence"] = f"{lead:.2f}", f"{tail:.2f}"
+            except Exception as e:  # noqa: BLE001  tried again by Look for new songs
+                log(f"Cannot measure the silence in {found}: {e}")
+    if added or updated:
+        save(path, rows)
+    return rows, added, updated, problems

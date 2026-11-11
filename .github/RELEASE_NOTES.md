@@ -8,9 +8,8 @@ Already installed? Run the new installer: it updates in place and keeps your set
 
 ## What's new
 
-- The main window now lists the formats it accepts: MKV, MP4, WAV, MP3 or M4A.
-- Every service recording is now processed the same way (an old shortcut for pre-trimmed WAV files from a separate tool was removed).
-- Leaven Labs is now shown as the publisher in the installer and the About box.
-- Updates move the program out of an install folder still named after the app's earlier name, into a "ChurchRadio Studio" folder.
+- **Import a song list.** Songs... → Import list... adds many songs at once (or changes their titles, seasons and on/off) from a CSV file. Click **Download template...** for a file to start from.
+- **Pick the service date from a calendar.** Click the date in the main window to choose another day.
+- **The service date starts on the coming Sunday** (or today, on a Sunday). A date in the recording's file name is still used unless you picked one in the calendar.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the installer's checksum.

@@ -94,9 +94,10 @@ later with the **Settings...** button.
    minutes to find the end, then joining and compressing.
 4. The MP3 is saved, and the app tells you where.
 
-**The service date** sets the church season. It is read from the file name — `10.11.2026`,
-`10-11-2026` (month first) or `2026-10-11` — or you can type it in the window (MM/DD/YYYY). With no
-date, the app asks before using today's date.
+**The service date** sets the church season. The window shows the coming Sunday (or today, on a
+Sunday). Click the date to pick another one from a calendar. If you don't pick one and the file name
+holds a date — `10.11.2026`, `10-11-2026` (month first) or `2026-10-11` — that date is used and shown
+in the window; a date you picked in the calendar always wins.
 
 **Options in the window:**
 - **Service start** — **Auto** (cut the organ prelude, keep a choir anthem), **Organ start** (always
@@ -166,6 +167,23 @@ For each one the app suggests a **title** and **seasons**:
 A table shows each suggestion, how it was found, and the words that were heard. Unsure ones are shown
 in orange. Correct anything, untick songs you don't want, choose the folder to put them in, and click
 **Add**: the files are copied there, measured, and added to your list.
+
+### Import a song list
+
+**Songs... → Import list...** adds many songs at once, or changes the titles, seasons and on/off of
+songs already in your list, from a CSV file. Click **Download template...** to save a starting file,
+fill it in Excel (keep it as CSV), then click **Import a file...**. Columns:
+
+- `file` — the song's full path, or just its file name if it is in one of your song folders;
+- `title` — the song name;
+- `seasons` — the [season words](#teach-it-your-own-songs) separated by `;` (`Holy Week` and
+  `General` also work); empty or `general` = any time of the year;
+- `enabled` — `yes` or `no`.
+
+For a song already in your list, an empty cell keeps what is there now. A new song with no seasons
+gets them guessed from its file and folder name. The song files are not copied: they stay where they
+are. Lines that can't be used (a file that isn't found, an unknown season) are skipped, and the app
+lists them.
 
 **Identify...** does the same for songs already in your list — select some, or select none to do every
 song that has no title yet.
@@ -315,6 +333,7 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | File | What it is |
 |---|---|
 | `app.py` | The main window. |
+| `datepicker.py` | The service date box and its pop-out calendar. |
 | `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
 | `songs_window.py` | The Songs window. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
@@ -322,10 +341,10 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | `prelude.py` | Speech recognition: finding the start and end of the service. |
 | `audio.py` | ffmpeg: lengths, silence, trimming, joining, compression. |
 | `picker.py` | Picks the songs that fill the time. |
-| `catalog.py` | The song list (`songs.csv`), seasons, songs with no words. |
+| `catalog.py` | The song list (`songs.csv`), seasons, songs with no words, importing a song list. |
 | `identify.py` | Finds a song's title and seasons from tags, lyrics or file name. |
 | `hymns.csv` | The hymn list used to recognise songs. |
-| `churchyear.py` | The church year and patriotic holiday weekends. |
+| `churchyear.py` | The church year, patriotic holiday weekends, the default service date. |
 | `paths.py` | Where the program, its defaults and the user's files are. |
 | `config.json` | Default settings (copied to the user's folder on first start). |
 | `assets/` | The icon (`icon.svg` is the source; `icon.ico` and `icon-256.png` are made from it). |

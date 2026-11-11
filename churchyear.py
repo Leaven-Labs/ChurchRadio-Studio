@@ -116,6 +116,20 @@ def date_from_filename(name):
     return None
 
 
+def default_service_date(today=None):
+    """The coming Sunday, or today when today is a Sunday."""
+    today = today or dt.date.today()
+    return today + dt.timedelta(days=(6 - today.weekday()) % 7)
+
+
+def service_date(shown, picked, filename, today=None):
+    """The date to build for: the date the person picked in the calendar, else the date in the
+    file name, else the coming Sunday (today, on a Sunday)."""
+    if picked:
+        return shown
+    return date_from_filename(filename) or default_service_date(today)
+
+
 def guess_seasons(text):
     """Guess song seasons from a file path. Empty set means 'general' (any time)."""
     t = re.sub(r"[_\-.]+", " ", text.lower())

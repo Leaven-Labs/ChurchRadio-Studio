@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -1186,3 +1187,141 @@ class PublicDomain(unittest.TestCase):
         url = get.call_args[0][0]
         self.assertIn("query.wikidata.org/sparql", url)
         self.assertNotIn("%22Amen%22", url)  # quotes taken out of the title: no broken query
+
+
+class CommandLine(unittest.TestCase):
+    """--build: no window, for Task Scheduler."""
+
+    def setUp(self):
+        import cli
+        self.cli = cli
+        self.tmp = tempfile.TemporaryDirectory()
+        self.rec = os.path.join(self.tmp.name, "recordings")
+        self.out = os.path.join(self.tmp.name, "out")
+        os.makedirs(self.rec)
+        os.makedirs(self.out)
+        self.cfg = {"setup_done": True, "broadcast_name": "Test Radio", "output_folder": self.out}
+        self.old = time.time() - 3600  # an hour ago: finished recording
+        cli.drop_lock()
+
+    def tearDown(self):
+        self.cli.drop_lock()
+        self.tmp.cleanup()
+
+    def recording(self, name, mtime=None):
+        p = os.path.join(self.rec, name)
+        open(p, "w").close()
+        os.utime(p, (mtime or self.old, mtime or self.old))
+        return p
+
+    def run_cli(self, *argv, build=None, cfg=None):
+        log = os.path.join(self.tmp.name, "run.log")
+        if os.path.exists(log):
+            os.remove(log)
+        # No console, as in the installed program: the log file is the only output.
+        with mock.patch.object(self.cli.builder, "load_config", return_value=cfg or self.cfg), \
+                mock.patch.object(sys, "stdout", None):
+            code = self.cli.main(list(argv) + ["--log", log], build=build)
+        with open(log, encoding="utf-8") as fh:
+            return code, fh.read()
+
+    def test_only_build_words_switch_it_on(self):
+        self.assertTrue(self.cli.build_args(["--build", "x"]))
+        self.assertTrue(self.cli.build_args(["--build=x"]))
+        self.assertFalse(self.cli.build_args(["C:\\service.mkv"]))   # a file dropped on the icon: the window
+        self.assertFalse(self.cli.build_args(["--selftest"]))
+
+    def test_folder_uses_the_newest_recording_and_its_date(self):
+        self.recording("BLC 11.08.2026.mkv", self.old - 7 * 86400)
+        new = self.recording("BLC 11.15.2026.mkv")
+        self.recording("notes.txt")
+        service, date, reason = self.cli.choose(self.rec, self.cfg)
+        self.assertEqual((service, date, reason), (new, D(2026, 11, 15), None))
+
+    def test_no_date_in_the_name_uses_the_day_it_was_recorded(self):
+        sunday = time.mktime((2026, 11, 15, 12, 30, 0, 0, 0, -1))
+        p = self.recording("service.mkv", sunday)
+        self.assertEqual(self.cli.choose(p, self.cfg, now=sunday + 3600)[1], D(2026, 11, 15))
+
+    def test_nothing_to_do(self):
+        self.assertIn("No recordings", self.cli.choose(self.rec, self.cfg)[2])
+        p = self.recording("BLC 11.15.2026.mkv", time.time() - 60)
+        self.assertIn("still be recording", self.cli.choose(self.rec, self.cfg)[2])
+        os.utime(p, (self.old, self.old))
+        open(os.path.join(self.out, "Test Radio 2026-11-15.mp3"), "w").close()
+        self.assertIn("already made", self.cli.choose(self.rec, self.cfg)[2])
+        self.assertEqual(self.cli.choose(self.rec, self.cfg, force=True)[0], p)  # --force: make it again
+        with self.assertRaises(ValueError):
+            self.cli.choose(os.path.join(self.rec, "missing.mkv"), self.cfg)
+
+    def test_a_run_builds_with_the_options_and_logs(self):
+        p = self.recording("service.mkv")
+        calls = []
+
+        def build(service, **kw):
+            calls.append((service, kw))
+            kw["log"]("Writing MP3 ...")
+            return os.path.join(self.out, "Test Radio.mp3")
+
+        code, log = self.run_cli("--build", p, "--date", "2026-11-15", "--start", "Keep start",
+                                 "--keep-end", "--no-compress", build=build)
+        self.assertEqual(code, 0)
+        service, kw = calls[0]
+        self.assertEqual((service, kw["date"], kw["start_mode"], kw["cut_end"], kw["compress"]),
+                         (p, D(2026, 11, 15), "Keep start", False, False))
+        self.assertIn("Writing MP3", log)
+        self.assertIn("Saved:", log)
+        self.assertFalse(os.path.exists(self.cli.lock_path()))  # the lock is let go
+
+    def test_exit_codes(self):
+        p = self.recording("service.mkv")
+
+        def too_long(service, **kw):
+            kw["warn"]("Intro + service is 1:05:00.")
+            return "x.mp3"
+
+        def fails(service, **kw):
+            raise RuntimeError("ffmpeg not found")
+
+        self.assertEqual(self.run_cli("--build", p, build=too_long)[0], 2)
+        code, log = self.run_cli("--build", p, build=fails)
+        self.assertEqual(code, 1)
+        self.assertIn("ffmpeg not found", log)
+        self.assertFalse(os.path.exists(self.cli.lock_path()))
+        self.assertEqual(self.run_cli("--build", p, "--date", "15/11/2026")[0], 1)
+        self.assertEqual(self.run_cli("--build", p, cfg={"setup_done": False})[0], 1)
+        code, log = self.run_cli("--build", p, "--dry-run", build=fails)  # dry run builds nothing
+        self.assertEqual(code, 0)
+        self.assertIn("Dry run", log)
+        self.assertEqual(self.run_cli("--build", self.rec + "-missing")[0], 1)
+
+    def test_bad_option_is_a_logged_failure_not_too_long(self):
+        with mock.patch.object(self.cli, "default_log_path", return_value=os.path.join(self.tmp.name, "u.log")), \
+                mock.patch.object(sys, "stdout", None):
+            self.assertEqual(self.cli.main(["--build", "x", "--colour", "red"]), 1)
+        with open(os.path.join(self.tmp.name, "u.log"), encoding="utf-8") as fh:
+            self.assertIn("ERROR", fh.read())
+
+    def test_one_build_at_a_time(self):
+        p = self.recording("service.mkv")
+        self.assertTrue(self.cli.take_lock("the app window"))
+        code, log = self.run_cli("--build", p, build=lambda s, **kw: "x.mp3")
+        self.assertEqual(code, 1)
+        self.assertIn("the app window", log)
+        self.cli.drop_lock()
+        # A lock left by a run that crashed hours ago does not block for ever.
+        self.assertTrue(self.cli.take_lock("old run"))
+        os.utime(self.cli.lock_path(), (self.old - 5 * 3600, self.old - 5 * 3600))
+        self.assertTrue(self.cli.take_lock("new run"))
+
+    def test_old_logs_are_tidied(self):
+        folder = os.path.join(self.tmp.name, "logs")
+        os.makedirs(folder)
+        for i in range(35):
+            f = os.path.join(folder, f"build {i:02d}.log")
+            open(f, "w").close()
+            os.utime(f, (self.old + i, self.old + i))
+        self.cli.tidy_logs(folder)
+        left = sorted(os.listdir(folder))
+        self.assertEqual(len(left), 30)
+        self.assertEqual(left[0], "build 05.log")  # the oldest went

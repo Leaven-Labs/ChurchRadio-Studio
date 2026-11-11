@@ -183,6 +183,39 @@ jobs:
           if ($o2 -notmatch "PRESENT before load" -or $o2 -match "MISSING before load") { throw "Run 2 would download the models again." }
           if ($o2 -notmatch "selftest: OK") { throw "Selftest run 2 failed." }
 
+          Write-Host "=== Headless build (--build, as Task Scheduler runs it) ==="
+          # A 2-minute test recording with the date in its name. It has no speech, so the start and
+          # end are not found and nothing is cut, but the speech models are loaded and searched.
+          $rec = Join-Path $env:RUNNER_TEMP "crs-recordings"
+          $out = Join-Path $env:RUNNER_TEMP "crs-out"
+          New-Item -ItemType Directory -Force -Path $rec, $out | Out-Null
+          & (Join-Path $dir "ffmpeg\ffmpeg.exe") -v error -y -f lavfi -i "sine=frequency=440:duration=120" -ac 2 `
+              (Join-Path $rec "BLCTrad11.15.2026 08-10.wav")
+          $cfgPath = "$env:APPDATA\ChurchRadio Studio\config.json"
+          $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+          $cfg.setup_done = $true
+          $cfg.output_folder = $out
+          $cfg.broadcast_name = "Headless Test"
+          $cfg | ConvertTo-Json -Depth 10 | Set-Content $cfgPath -Encoding utf8
+          function Invoke-Build([string[]]$more) {
+              $log = Join-Path $env:RUNNER_TEMP ("crs-build-" + [guid]::NewGuid() + ".log")
+              # Start-Process -Wait: the program has no console, so wait for it like Task Scheduler does.
+              $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList (@("--build", "`"$rec`"", "--log", "`"$log`"") + $more)
+              $text = if (Test-Path $log) { Get-Content $log -Raw } else { "(no log written)" }
+              Write-Host $text
+              return @{ Code = $p.ExitCode; Log = $text }
+          }
+          $r = Invoke-Build @("--settle", "0")
+          if ($r.Code -ne 0) { throw "Headless build failed (exit $($r.Code))." }
+          $mp3 = Join-Path $out "Headless Test 2026-11-15.mp3"
+          if (-not (Test-Path $mp3)) { throw "Headless build did not save $mp3." }
+          if ($r.Log -notmatch "Saved:") { throw "The headless log does not say where the MP3 was saved." }
+          $r = Invoke-Build @("--settle", "0")
+          if ($r.Code -ne 0 -or $r.Log -notmatch "already made") { throw "A second run should find nothing to do." }
+          $r = Invoke-Build @("--settle", "0", "--date", "15/11/2026")
+          if ($r.Code -ne 1) { throw "A bad --date should end with exit code 1, not $($r.Code)." }
+          if (Test-Path "$env:APPDATA\ChurchRadio Studio\build.lock") { throw "The headless build left its lock behind." }
+
           Write-Host "=== Uninstall keeps the user's files ==="
           $un = Get-ChildItem $dir -Filter "unins*.exe" | Select-Object -First 1
           $p = Start-Process -FilePath $un.FullName -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
@@ -190,7 +223,7 @@ jobs:
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { throw "Uninstall left the program behind." }
           if (-not (Test-Path "$env:APPDATA\ChurchRadio Studio\config.json")) { throw "Uninstall removed the user's settings." }
-          Write-Host "Smoke test PASS: installed, ffmpeg found, files in %APPDATA%, models downloaded once, uninstall keeps settings."
+          Write-Host "Smoke test PASS: installed, ffmpeg found, files in %APPDATA%, models downloaded once, headless build works, uninstall keeps settings."
 
       # ------------------------------------------------------------------
       # Update test: install the PREVIOUS release, give it settings, then run this installer

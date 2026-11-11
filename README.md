@@ -40,6 +40,7 @@ can use it too. It is published by [Leaven Labs](https://leavenlabs.org) as free
 - [Install](#install)
 - [First start: the setup wizard](#first-start-the-setup-wizard)
 - [Making the broadcast each week](#making-the-broadcast-each-week)
+- [Making it automatically (Task Scheduler)](#making-it-automatically-task-scheduler)
 - [How the cuts work](#how-the-cuts-work)
 - [Your songs](#your-songs)
 - [Settings](#settings)
@@ -110,6 +111,62 @@ in the window; a date you picked in the calendar always wins.
 **Too long?** If the intro and the service alone are longer than the broadcast, no songs are added;
 the MP3 is still saved and a warning says how much too long it is, so you can trim it by hand (for
 example in Audacity).
+
+## Making it automatically (Task Scheduler)
+
+The app can make the broadcast with **no window**, so Windows Task Scheduler can run it each week:
+
+```bat
+"C:\Program Files\ChurchRadio Studio\ChurchRadio-Studio.exe" --build "D:\OBS Recordings"
+```
+
+`--build` takes a recording or a **folder**. With a folder it uses the newest recording in it, and
+does nothing if that recording's broadcast MP3 is already made, or if the recording was changed in the
+last 10 minutes (it may still be recording or copying: the next run picks it up). It uses your
+Settings, the same as the window. Nothing appears on screen.
+
+**Service date:** the date in the file name, else the day the recording was made — not the coming
+Sunday, so a Monday run still uses Sunday's season and songs.
+
+**Options** (for one run; your Settings stay as they are):
+
+| Option | What it does |
+|---|---|
+| `--date 2026-11-15` | Use this service date. |
+| `--start "Keep start"` | Where the service starts: `Auto`, `Organ start` or `Keep start`. |
+| `--keep-end` | Keep everything after the end of the service. |
+| `--no-compress` | Save the MP3 without the broadcast compressor. |
+| `--force` | Make the broadcast again even if its MP3 is already there. |
+| `--dry-run` | Only write in the log which recording and date it would use. Good for checking the set-up. |
+| `--settle 30` | Skip a recording changed in the last 30 minutes (default 10). |
+| `--log "D:\Radio\last run.log"` | Write the log here. |
+
+**What happened:** each run writes a log to `logs\` in [your settings folder](#where-your-files-are)
+(the newest 30 are kept). Task Scheduler shows the exit code as **Last Run Result**:
+`0` done (or nothing to do), `1` failed (the log says why), `2` done but too long — edit the MP3 by hand.
+
+Only one broadcast is made at a time: if the window is making one, the scheduled run stops (exit 1),
+and the other way round.
+
+**Set it up** (open the app and finish the setup first):
+
+1. Open **Task Scheduler** → **Create Task...**.
+2. **General:** a name such as *ChurchRadio Studio broadcast*. Use **your own Windows account** (the
+   settings and song list are kept per account). *Run only when user is logged on* is simplest; with
+   *Run whether user is logged on or not*, use `\\server\share` paths rather than mapped drive letters.
+3. **Triggers:** **Weekly**, for example **Sunday 2:00 PM** — after the recording has finished.
+4. **Actions:** **Start a program**. *Program:* the app (`C:\Program Files\ChurchRadio Studio\ChurchRadio-Studio.exe`).
+   *Arguments:* `--build "D:\OBS Recordings"`.
+5. **Settings:** tick **Stop the task if it runs longer than 2 hours**.
+
+Or the same from a Command Prompt:
+
+```bat
+schtasks /Create /TN "ChurchRadio Studio broadcast" /SC WEEKLY /D SUN /ST 14:00 /TR "\"C:\Program Files\ChurchRadio Studio\ChurchRadio-Studio.exe\" --build \"D:\OBS Recordings\""
+```
+
+Test it with right-click → **Run**, then read the newest log. If the program is installed in your own
+programs folder instead, use `%LOCALAPPDATA%\Programs\ChurchRadio Studio\ChurchRadio-Studio.exe`.
 
 ## How the cuts work
 
@@ -356,7 +413,8 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 
 | File | What it is |
 |---|---|
-| `app.py` | The main window. |
+| `app.py` | The main window (and `--build` / `--selftest` from the command line). |
+| `cli.py` | `--build`: making the broadcast with no window, for Task Scheduler. |
 | `datepicker.py` | The service date box and its pop-out calendar. |
 | `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
 | `songs_window.py` | The Songs window. |

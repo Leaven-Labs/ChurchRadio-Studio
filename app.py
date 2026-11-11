@@ -1,4 +1,7 @@
-"""ChurchRadio Studio window. Drop a service recording on it to make the broadcast MP3."""
+"""ChurchRadio Studio window. Drop a service recording on it to make the broadcast MP3.
+
+With --build it makes the broadcast with no window instead (cli.py), for Task Scheduler."""
+import atexit
 import os
 import queue
 import sys
@@ -9,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 import audio
 import builder
 import churchyear
+import cli
 import datepicker
 import paths
 import prelude
@@ -77,6 +81,7 @@ def about(parent):
 class App:
     def __init__(self, root):
         self.root, self.q, self.busy, self.warning = root, queue.Queue(), False, None
+        atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
         root.title(paths.APP_NAME)
         set_icon(root)
         root.geometry("760x530")
@@ -194,6 +199,10 @@ class App:
     def start(self, path):
         if self.busy:
             return
+        if not cli.take_lock("the app window"):
+            messagebox.showwarning(paths.APP_NAME, "A broadcast is already being made "
+                                   f"({cli.lock_owner()}). Try again when it is done.")
+            return
         date = churchyear.service_date(self.date.get(), self.date.changed, os.path.basename(path))
         if date != self.date.get():
             self.date.set_date(date)  # show the date read from the file name
@@ -225,6 +234,7 @@ class App:
                 self.text.see("end")
             else:
                 self.busy = False
+                cli.drop_lock()
                 self.songs_btn.state(["!disabled"])
                 self.settings_btn.state(["!disabled"])
                 self.status.config(text="Done." if kind == "done" else "Failed.")
@@ -288,6 +298,8 @@ def _selftest():
 
 def main():
     builder.ensure_user_files()
+    if cli.build_args(sys.argv[1:]):  # --build: no window, for Task Scheduler
+        sys.exit(cli.main(sys.argv[1:]))
     if "--selftest" in sys.argv:
         _selftest()
         return

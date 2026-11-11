@@ -201,7 +201,8 @@ per song; click **Stop** to stop (the songs already done are kept).
 - **No** — under copyright.
 - **Check** — the original is old, but a newer version may be the one sung — for example "How Great
   Thou Art", whose Swedish original is from 1885 but whose English version is from 1949. Also shown
-  when only part of a title matched (e.g. "Amazing Grace (My Chains Are Gone)").
+  when only the original in another language was found, when only part of a title matched (e.g.
+  "Amazing Grace (My Chains Are Gone)"), or when the dates on Wikidata don't agree.
 - **?** — not found, or no dates to go on.
 
 Click a song to see why underneath the list. Offline, songs in the app's own hymn list are still

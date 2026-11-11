@@ -38,9 +38,11 @@ COPYRIGHTED = "Q50423863"  # Wikidata: copyrighted
 
 # Hymn-like items: the class or the description must say so. Recordings, albums, films, episodes
 # and pop songs that share the title are left out.
-HYMN_WORDS = ("hymn", "carol", "chorale", "psalm", "spiritual", "lyrics", "translat", "adapt",
-              "melody", "tune", "worship song", "christian song", "gospel song", "anthem",
-              "song written", "composed")
+VERSION_WORDS = ("hymn", "carol", "chorale", "psalm", "spiritual", "lyrics", "translat", "adapt",
+                 "melody", "tune", "worship song", "christian song", "gospel song", "anthem")
+# A song described only as "song written / composed by ..." can be the song itself (a modern worship
+# song), but not a newer version of a hymn: "Joy to the World" (1970, Hoyt Axton) is another song.
+HYMN_WORDS = VERSION_WORDS + ("song written", "composed")
 NOT_WORK_WORDS = ("recording", "track", "album", "single", "audio", "film", "episode", "video",
                   "disambiguation", "book", "print", "painting", "edition")
 TRANSLATION_WORDS = ("translat", "english version", "english language version")
@@ -155,11 +157,11 @@ def parse(data):
     return items
 
 
-def hymn_like(item):
+def hymn_like(item, words=HYMN_WORDS):
     text = " ".join([item["desc"]] + item["classes"]).lower()
     if any(w in item["desc"].lower() for w in NOT_WORK_WORDS):
         return False
-    return any(w in text for w in HYMN_WORDS)
+    return any(w in text for w in words)
 
 
 def is_translation(item):
@@ -172,6 +174,10 @@ def _when(item, cutoff):
     The publication year counts; a work written by a year was published no earlier, so a
     written year after the cutoff also means it is still protected."""
     pub, written = item.get("published"), item.get("written")
+    m = re.search(r"\b(1[0-9]{3}|20[0-9]{2})\b", item.get("desc") or "")
+    told = int(m.group(1)) if m else None  # "1719 Christmas hymn by Isaac Watts"
+    if told is not None and told < min(y for y in (pub, written, told + 1) if y is not None):
+        return told, f"from {told}"
     if pub is not None:
         return pub, (f"written {written}, published {pub}" if written is not None and written < pub
                      else f"published {pub}")
@@ -185,6 +191,16 @@ def _when(item, cutoff):
     if item["creators_died"] is not None and item["creators_died"] <= cutoff:
         return item["creators_died"], f"writer died {item['creators_died']}"
     return None, "no date"
+
+
+def _free(item, cutoff):
+    """True if this item on its own is in the public domain."""
+    if COPYRIGHTED in item["statuses"]:
+        return False
+    if PUBLIC_DOMAIN in item["statuses"]:
+        return True
+    year, _why = _when(item, cutoff)
+    return year is not None and year <= cutoff
 
 
 def _name(item):
@@ -201,13 +217,24 @@ def judge(title, items, today=None):
         return None
     main, others = found[0], found[1:]
     year, why = _when(main, cutoff)
-    if COPYRIGHTED in main["statuses"] or (year is not None and year > cutoff):
+    late = year is not None and year > cutoff
+    if late and main["creators_died"] is not None and main["creators_died"] <= cutoff - 50 \
+            and COPYRIGHTED not in main["statuses"]:
+        # A writer dead for centuries and a recent date: most likely the date of an edition.
+        return {"status": "check", "source": "Wikidata",
+                "note": f"Wikidata gives {why}, but the writer died in {main['creators_died']}: the date is "
+                        f"probably of a newer edition ({_name(main)})."}
+    if COPYRIGHTED in main["statuses"] or late:
         return {"status": "no", "note": f"Under copyright: {why} ({_name(main)}).", "source": "Wikidata"}
     if year is None and PUBLIC_DOMAIN not in main["statuses"]:
         return {"status": "unknown", "note": f"Found {_name(main)} on Wikidata, but {why}.", "source": "Wikidata"}
     first = f"public domain ({why})" if year is not None else "marked public domain"
+    if norm(main["label"]) != want and not any(norm(o["label"]) == want and _free(o, cutoff) for o in others):
+        return {"status": "check", "source": "Wikidata",
+                "note": f"The original {_name(main)} is {first}, but the words sung under this title may be a "
+                        "newer translation. Check the translation."}
     for o in others:
-        if PUBLIC_DOMAIN in o["statuses"] and COPYRIGHTED not in o["statuses"]:
+        if not hymn_like(o, VERSION_WORDS) or PUBLIC_DOMAIN in o["statuses"] and COPYRIGHTED not in o["statuses"]:
             continue
         oy, owhy = _when(o, cutoff)
         newer = COPYRIGHTED in o["statuses"] or (oy is not None and oy > cutoff)
@@ -224,12 +251,17 @@ def wikidata(title, today=None):
 
 # ---- the app's hymn list (offline) ------------------------------------------------------------
 def hymn_list(title, hymns):
-    """The app's own hymn list has lyric lines only for public-domain hymns."""
+    """The app's own hymn list has lyric lines only for public-domain hymns; the others are
+    listed by title only."""
     want = norm(title)
     for h in hymns:
-        if norm(h["title"]) == want and h.get("lines"):
-            return {"status": "yes", "source": "the app's hymn list",
-                    "note": "Public domain, according to the app's hymn list."}
+        if norm(h["title"]) == want:
+            if h.get("lines"):
+                return {"status": "yes", "source": "the app's hymn list",
+                        "note": "Public domain, according to the app's hymn list."}
+            return {"status": "check", "source": "the app's hymn list",
+                    "note": "The app's hymn list has this song as one still under copyright (for example "
+                            "a newer translation)."}
     return None
 
 
@@ -251,6 +283,11 @@ def lookup(title, hymns=(), today=None, sources=None):
             except LookupError_ as e:
                 error = e
                 continue
+            listed = hymn_list(tries, hymns)
+            if r and r["status"] == "unknown" and listed:
+                r = {**listed, "note": f"{listed['note']} ({r['note']})"}
+            elif r and r["status"] == "yes" and listed and listed["status"] == "check":
+                r = {**r, "status": "check", "note": f"{r['note']} {listed['note']}"}
             if r:
                 if tries != title and r["status"] == "yes":  # matched only a shorter title
                     r = {**r, "status": "check",
@@ -259,7 +296,7 @@ def lookup(title, hymns=(), today=None, sources=None):
                 return r
         r = hymn_list(tries, hymns)
         if r:
-            return r if tries == title else {**r, "status": "check",
+            return r if tries == title or r["status"] != "yes" else {**r, "status": "check",
                                              "note": f'"{tries}" is in the app\'s public-domain hymn list, '
                                                      "but the rest of the title may mean a newer version."}
     if error:

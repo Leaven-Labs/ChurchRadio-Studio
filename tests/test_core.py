@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import os
 import sys
 import tempfile
@@ -1141,8 +1142,33 @@ class PublicDomain(unittest.TestCase):
             raise self.pd.LookupError_("Could not reach Wikidata")
         hymns = [{"title": "Abide with Me", "lines": [["abide"]]}, {"title": "New Song", "lines": []}]
         self.assertEqual(self.pd.lookup("Abide With Me", hymns, sources=[offline])["status"], "yes")
+        # Listed by title only: the app's list has it as still under copyright.
+        self.assertEqual(self.pd.lookup("New Song", hymns, sources=[offline])["status"], "check")
         with self.assertRaises(self.pd.LookupError_):  # offline and not in the hymn list: tell the person
-            self.pd.lookup("New Song", hymns, sources=[offline])
+            self.pd.lookup("Unknown Song", hymns, sources=[offline])
+        # Online: a "?" from Wikidata is answered by the hymn list, and a title-only entry turns Yes into Check.
+        unknown = lambda t, today=None: {"status": "unknown", "note": "No date.", "source": "Wikidata"}
+        self.assertEqual(self.pd.lookup("Abide with Me", hymns, sources=[unknown])["status"], "yes")
+        self.assertEqual(self.pd.lookup("New Song", hymns, sources=[lambda t, today=None: {
+            "status": "yes", "note": "Public domain (published 1812).", "source": "Wikidata"}])["status"], "check")
+
+    def test_real_wikidata_answers(self):
+        """Answers saved from Wikidata in November 2026, judged as on 11 November 2026."""
+        with open(os.path.join(os.path.dirname(__file__), "wikidata_answers.json"), encoding="utf-8") as fh:
+            answers = json.load(fh)
+        want = {
+            "Amazing Grace": "yes", "A Mighty Fortress Is Our God": "yes", "Silent Night": "yes",
+            "Holy, Holy, Holy": "yes", "Great Is Thy Faithfulness": "yes", "Lift High the Cross": "yes",
+            "Joy to the World": "yes",            # not the 1970 Hoyt Axton song of the same name
+            "O Come O Come Emmanuel": "yes", "Abide with Me": "yes", "It Is Well with My Soul": "yes",
+            "How Great Thou Art": "check",        # 1885 Swedish original, English version later
+            "Prepare the Royal Highway": "check",  # matched only the 1812 Swedish original
+            "In Christ Alone": "no", "Shout to the Lord": "no", "Here I Am to Worship": "no",
+            "Be Thou My Vision": "unknown", "10,000 Reasons": None, "Track 03": None,
+        }
+        for title, status in want.items():
+            r = self.judge(title, self.pd.parse(answers[title]))
+            self.assertEqual(r and r["status"], status, title)
 
     def test_parse_and_query_text(self):
         data = {"results": {"bindings": [{

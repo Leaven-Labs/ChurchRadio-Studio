@@ -96,6 +96,9 @@ later with the **Settings...** button.
    minutes to find the end, then joining and compressing.
 4. The MP3 is saved, and the app tells you where.
 
+Or let Windows make it every week with no one at the PC: see
+[Making it automatically](#making-it-automatically-task-scheduler).
+
 **The service date** sets the church season. The window shows the coming Sunday (or today, on a
 Sunday). Click the date to pick another one from a calendar. If you don't pick one and the file name
 holds a date — `10.11.2026`, `10-11-2026` (month first) or `2026-10-11` — that date is used and shown
@@ -342,7 +345,7 @@ can't be found (moved, or a drive not plugged in), its songs stay in the list wi
 | What | Where |
 |---|---|
 | The program (and ffmpeg) | `C:\Program Files\ChurchRadio Studio` (or your own programs folder) |
-| Your settings, song list, history, `end_words.txt`, your `hymns.csv` | `%APPDATA%\ChurchRadio Studio` |
+| Your settings, song list, history, `end_words.txt`, your `hymns.csv`, the logs of scheduled runs (`logs\`) | `%APPDATA%\ChurchRadio Studio` |
 | The speech models (one copy per PC) | `C:\ProgramData\ChurchRadio Studio\models` |
 
 To open your settings folder, paste `%APPDATA%\ChurchRadio Studio` into the File Explorer address bar.
@@ -367,6 +370,19 @@ added. Trim it by hand, or raise the broadcast length.
 
 **A song keeps being chosen that shouldn't be.** Open **Songs...** and turn it off, or change its
 seasons.
+
+**The scheduled broadcast wasn't made.** Open the newest log in `logs\` in your settings folder
+(paste `%APPDATA%\ChurchRadio Studio\logs` into the File Explorer address bar). The log says what happened:
+- *Nothing to do* — the newest recording's MP3 was already there, the recording was still being
+  written (the next run makes it), or the folder had no recordings: check the folder in the task.
+- *Open ChurchRadio Studio once and finish the setup first* — the task runs as a different Windows
+  account than the one you set the app up with. Set the task to your own account.
+- *Not found* — the folder can't be reached. A mapped drive letter (`D:`, `Z:`) may not exist when
+  no one is logged on: use a `\\server\share` path, or *Run only when user is logged on*.
+- *Another broadcast is being made right now* — the window was making one at the same time.
+- **No new log at all** — the task didn't start: check its trigger, and its **History** tab in Task Scheduler.
+
+To check the set-up without making anything, run the task's command with `--dry-run` added.
 
 **The speech models won't download.** The first start needs internet once (about 620 MB). If a PC
 has no internet, copy the `models` folder from another PC into `C:\ProgramData\ChurchRadio Studio\`,

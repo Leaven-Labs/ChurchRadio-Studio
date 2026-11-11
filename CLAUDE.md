@@ -12,6 +12,18 @@ item. Remove it from this file once it is built.
   modern recording or arrangement is still protected, and tags are often missing or wrong. Goes with
   the public-domain lookup (option D, an online lookup), which judges the song, not the recording.
 
+## Release plan (decided November 2026)
+
+- **1.1.0: the windows are Qt (PySide6), on the same Python code.** Staged on the branch
+  `claude/vigilant-darwin-yyq45t`: not tagged or released yet. `ui.py` holds the look (light and
+  dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen, and the
+  release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
+- **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
+  The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
+  Whisper engine (whisper.cpp) will need them tuned again against real recordings.
+- Download size matters to the maintainer. The cheapest saving, on any toolkit, is a smaller ffmpeg
+  for Windows and Linux (built with only what the app uses, as the Mac job already does).
+
 ## Suggested work, not yet scheduled (from the November 2026 code review)
 
 The maintainer asked to hold these for later. Do not start on them unasked; offer the list when

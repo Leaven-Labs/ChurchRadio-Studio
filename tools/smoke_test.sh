@@ -10,7 +10,7 @@
 # VERSION     the version the app must report
 #
 # The same checks as the Windows job: --selftest twice (the models download once, then load from
-# disk), then headless builds with --build: a broadcast is made, a second run finds nothing to do,
+# disk), --uitest (every window is made once, off screen), then headless builds with --build: a broadcast is made, a second run finds nothing to do,
 # a bad --date fails with exit code 1, and no lock is left behind.
 set -euo pipefail
 
@@ -64,6 +64,11 @@ echo "=== Selftest run 2 (models already on disk) ==="
 selftest 2
 has "$out" "PRESENT before load" "run 2 would download the models again"
 grep -q "MISSING before load" <<<"$out" && fail "run 2 would download the models again"
+
+echo "=== Window test (--uitest: every window is made once, off screen) ==="
+ui=$(limit 300 "$PROGRAM" --uitest 2>&1) || { echo "$ui"; fail "the windows could not be made (--uitest)"; }
+echo "$ui"
+has "$ui" "uitest: OK" "the windows could not be made (--uitest)"
 
 echo "=== Headless build (--build, as cron or launchd runs it) ==="
 rec="$work/recordings" outdir="$work/out"

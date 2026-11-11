@@ -17,9 +17,9 @@
 #   bundled: on first run they download once to one fixed folder per PC
 #   (C:\ProgramData\ChurchRadio Studio\models, or config.json models_folder if set),
 #   then load from disk with no network. The README says where they live.
-# - tkinterdnd2 ships a PyInstaller hook (__pyinstaller/hook-tkinterdnd2.py) that pulls
-#   in the platform `tkdnd/` Tk extension. We also list the data defensively so a
-#   version bump in the hook can't silently drop it.
+# - The windows are Qt (PySide6-Essentials). PyInstaller's own PySide6 hooks bundle the Qt
+#   modules the app imports (QtCore, QtGui, QtWidgets) and their plugins. Qt is LGPL: it stays in
+#   separate library files in the program folder, which this one-folder build does.
 # - ffmpeg / ffprobe are not in this folder: the installer adds an LGPL ffmpeg build in
 #   {app}\ffmpeg (see release.yml). audio.find_tool() looks there first, then the app folder,
 #   PATH, and C:\ffmpeg\bin.
@@ -27,10 +27,6 @@ import os
 import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
-# tkinterdnd2 platform data (Tk extension: .tcl files + platform lib/dll).
-tkinterdnd2_data = collect_data_files("tkinterdnd2")
-# sv-ttk (the app's look): its Tcl theme files and widget pictures.
-sv_ttk_data = collect_data_files("sv_ttk")
 # faster-whisper ships ctranslate2 binaries and assets; collect their data files.
 faster_whisper_data = collect_data_files("faster_whisper")
 # ctranslate2 native libraries (the actual inference engine).
@@ -56,11 +52,12 @@ app_defaults.append(("hymns.csv", "."))
 # The version of this build (written by the release workflow; missing when built by hand).
 if os.path.exists("version.txt"):
     app_defaults.append(("version.txt", "."))
-# The icon, for the window title bar and taskbar.
-app_defaults += [("assets/icon.ico", "assets"), ("assets/icon-256.png", "assets")]
+# The icon, for the window title bar and taskbar, and the two small pictures the look uses.
+app_defaults += [("assets/icon.ico", "assets"), ("assets/icon-256.png", "assets"),
+                 ("assets/ui-tick.png", "assets"), ("assets/ui-chevron.png", "assets")]
 
 datas = []
-for d in (tkinterdnd2_data, sv_ttk_data, faster_whisper_data, tokenizers_data, huggingface_data):
+for d in (faster_whisper_data, tokenizers_data, huggingface_data):
     datas.extend(d)
 datas.extend(app_defaults)
 
@@ -73,7 +70,7 @@ hiddenimports = (
     + collect_submodules("ctranslate2")
     + collect_submodules("tokenizers")
     + collect_submodules("huggingface_hub")
-    + ["tkinterdnd2", "tkinterdnd2.TkinterDnD"]
+    + ["mainwindow"]  # imported inside app.main(), after --build and --selftest
 )
 
 a = Analysis(
@@ -85,8 +82,26 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["matplotlib", "PyQt5", "PyQt6", "PySide2", "PySide6"],
+    excludes=["matplotlib", "tkinter", "PyQt5", "PyQt6", "PySide2"],
 )
+
+# Parts of Qt the app does not use, left out to keep the download small:
+# - Qt's software OpenGL (about 20 MB on Windows): only for 3D and Qt Quick; the windows are
+#   plain widgets.
+# - Qt's own translations: the app is in English.
+# - Linux: the GTK look for Qt (the app has its own look), and with it the copy of GTK 3 from the
+#   build machine that PyInstaller would put in the program.
+QT_LEFT_OUT = ("opengl32sw", "libqgtk3", "libgtk-3", "libgdk-3", "libatk-", "libcairo-gobject", "libpango",
+               "libgdk_pixbuf")
+
+
+def _kept(entry):
+    name, dest = os.path.basename(entry[0]).lower(), entry[0].replace("\\", "/")
+    return not name.startswith(QT_LEFT_OUT) and "/Qt/translations/" not in dest and "/Qt6/translations/" not in dest
+
+
+a.binaries = [b for b in a.binaries if _kept(b)]
+a.datas = [d for d in a.datas if _kept(d)]
 
 pyz = PYZ(a.pure)
 

@@ -832,12 +832,12 @@ if __name__ == "__main__":
 
 
 try:
-    import songs_window  # noqa: E402  (needs tkinter)
+    import songs_window  # noqa: E402  (needs PySide6)
 except ImportError:  # pragma: no cover
     songs_window = None
 
 
-@unittest.skipIf(songs_window is None, "tkinter not installed")
+@unittest.skipIf(songs_window is None, "PySide6 not installed")
 class SongsWindowHelpers(unittest.TestCase):
     def test_labels(self):
         r = {"file": os.path.join("x", "1-03 Organ.mp3"), "title": "", "seasons": "holyweek;lent"}
@@ -879,12 +879,12 @@ class SongsWindowHelpers(unittest.TestCase):
 
 
 try:
-    import setup_wizard  # noqa: E402  (needs tkinter)
+    import setup_wizard  # noqa: E402  (needs PySide6)
 except ImportError:  # pragma: no cover
     setup_wizard = None
 
 
-@unittest.skipIf(setup_wizard is None, "tkinter not installed")
+@unittest.skipIf(setup_wizard is None, "PySide6 not installed")
 class SetupWizardModule(unittest.TestCase):
     def test_pages(self):
         self.assertTrue(callable(setup_wizard.SetupWizard.page_welcome))
@@ -988,12 +988,12 @@ class Identify(unittest.TestCase):
 
 
 try:
-    import add_songs  # noqa: E402  (needs tkinter)
+    import add_songs  # noqa: E402  (needs PySide6)
 except ImportError:  # pragma: no cover
     add_songs = None
 
 
-@unittest.skipIf(add_songs is None, "tkinter not installed")
+@unittest.skipIf(add_songs is None, "PySide6 not installed")
 class AddSongsHelpers(unittest.TestCase):
     def test_unique_path(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1056,22 +1056,241 @@ class ServiceDate(unittest.TestCase):
         self.assertEqual(cy.service_date(D(2026, 10, 11), False, "service.mkv", today), D(2026, 11, 15))
 
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # the window tests draw to memory, not a screen
 try:
-    import datepicker  # noqa: E402  (needs tkinter)
+    import mainwindow  # noqa: E402  (needs PySide6)
+    import ui  # noqa: E402
+    from PySide6.QtCore import Qt  # noqa: E402
 except ImportError:
-    datepicker = None
+    mainwindow = None
 
 
-@unittest.skipIf(datepicker is None, "tkinter not installed")
-class Calendar(unittest.TestCase):
-    def test_month_grid_starts_on_sunday(self):
-        weeks = datepicker.month_weeks(2026, 11)  # 1 November 2026 is a Sunday
-        self.assertEqual(weeks[0][0], D(2026, 11, 1))
-        self.assertTrue(all(len(w) == 7 for w in weeks))
-        self.assertEqual([d for w in weeks for d in w if d][-1], D(2026, 11, 30))
-        self.assertEqual(datepicker.month_weeks(2026, 12)[0][:2], [None, None])  # 1 Dec is a Tuesday
-        self.assertEqual(datepicker.add_months(D(2026, 12, 20), 1), D(2027, 1, 1))
-        self.assertEqual(datepicker.add_months(D(2026, 1, 31), -1), D(2025, 12, 1))
+def _pump(until=None, seconds=5.0):
+    """Let Qt work (timers, signals): for a moment, or until until() is true or the time is up."""
+    app = ui.QApplication.instance()
+    end = time.time() + (seconds if until else 0.05)
+    until = until or (lambda: False)
+    app.processEvents()
+    while not until() and time.time() < end:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+@unittest.skipIf(mainwindow is None, "PySide6 not installed")
+class Windows(unittest.TestCase):
+    """The Qt windows, made off screen: what the person does must end up in the files."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = ui.start_app(["test"], "light")
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.csv = os.path.join(self.dir.name, "songs.csv")
+        self.songs = {}
+        for name, title, on, pd in (("a.mp3", "Amazing Grace", "yes", "yes"), ("b.mp3", "", "yes", "no"),
+                                    ("c.mp3", "Organ", "no", "")):
+            f = os.path.join(self.dir.name, name)
+            open(f, "wb").close()
+            self.songs[name] = f
+            catalog.save(self.csv, {**catalog.load(self.csv), f: {
+                "file": f, "title": title, "duration": "200", "seasons": "", "enabled": on, "words": "30",
+                "public_domain": pd}})
+
+    def songs_window(self):
+        w = songs_window.SongsWindow(None, self.csv, [self.dir.name])
+        self.addCleanup(w.done, 0)
+        return w
+
+    def test_theme(self):
+        ui.apply_theme(self.app, "dark")
+        self.assertEqual(ui.colors["bg"], ui.DARK["bg"])
+        ui.apply_theme(self.app, "light")
+        self.assertEqual(ui.colors["bg"], ui.LIGHT["bg"])
+        ui.apply_theme(self.app, "no such theme")  # falls back to the system's
+        self.assertIn(ui.colors["bg"], (ui.LIGHT["bg"], ui.DARK["bg"]))
+        ui.apply_theme(self.app, "light")
+
+    def test_steps_from_the_log(self):
+        self.assertEqual(mainwindow.step_for('Searching for "Good morning" in the first 30 min ...'),
+                         "Finding the start of the service ...")
+        self.assertEqual(mainwindow.step_for("Writing MP3 (no compression) ..."), "Writing the MP3 ...")
+        self.assertIsNone(mainwindow.step_for("Service date 11/15/2026: season of Pentecost"))
+
+    def test_main_window_makes_a_broadcast(self):
+        """Dropping a recording: the build runs in the background, its log lines and steps are
+        shown, the lock is taken and given back, and the result is told."""
+        told = []
+
+        def build(path, date=None, log=print, **more):
+            log('Searching for "Good morning" in the first 30 min (takes about 30 s) ...')
+            log("Writing MP3 (no compression) ...")
+            return os.path.join(self.dir.name, "out.mp3")
+
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.builder, "build", side_effect=build) as made, \
+                mock.patch.object(mainwindow.QMessageBox, "information", side_effect=lambda *a: told.append(a[2])), \
+                mock.patch.object(mainwindow.QMessageBox, "critical", side_effect=lambda *a: told.append(a[2])):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.start(os.path.join(self.dir.name, "service 11.15.2026.mkv"))
+            self.assertTrue(w.busy)
+            self.assertFalse(w.songs_btn.isEnabled())
+            _pump(lambda: not w.busy)
+            self.assertEqual(made.call_args[1]["date"], D(2026, 11, 15))  # read from the file name
+            self.assertEqual(w.date.get(), D(2026, 11, 15))
+            self.assertIn("Writing MP3", w.text.toPlainText())
+            self.assertEqual(w.status.text(), "Done.")
+            self.assertTrue(told and told[0].startswith("MP3 saved:"))
+            self.assertTrue(w.songs_btn.isEnabled())
+            self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+
+            made.side_effect = RuntimeError("ffmpeg not found")
+            w.start(os.path.join(self.dir.name, "service.mkv"))
+            _pump(lambda: not w.busy)
+            self.assertEqual((w.status.text(), told[-1]), ("Failed.", "ffmpeg not found"))
+            self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+
+    def test_date_field(self):
+        f = ui.DateField(D(2026, 11, 15))
+        self.assertEqual((f.get(), f.changed), (D(2026, 11, 15), False))
+        f.set_date(D(2026, 11, 22))  # from the file name: not the person's choice
+        self.assertEqual((f.get(), f.changed), (D(2026, 11, 22), False))
+        f.setDate(f.date().addDays(7))  # as the calendar does
+        self.assertEqual((f.get(), f.changed), (D(2026, 11, 29), True))
+
+    def test_songs_list_shows_and_filters(self):
+        w = self.songs_window()
+        t = w.table
+        self.assertEqual(t.rowCount(), 3)
+        self.assertEqual([t.item(i, songs_window.TITLE).text() for i in range(3)], ["Amazing Grace", "b", "Organ"])
+        self.assertEqual([t.item(i, songs_window.ON).checkState() == Qt.Checked for i in range(3)],
+                         [True, True, False])
+        self.assertEqual([t.item(i, songs_window.PD).data(Qt.UserRole) for i in range(3)], ["ok", "no", ""])
+        self.assertEqual(w.status.text(), "3 songs, 2 on")
+        w.show_box.setCurrentText("Off")
+        self.assertEqual(t.rowCount(), 1)
+        self.assertEqual(w.status.text(), "1 shown. 3 songs, 2 on")
+        w.show_box.setCurrentText("All songs")
+        w.find.setText("grace")
+        self.assertEqual(t.rowCount(), 1)
+
+    def test_songs_tick_and_rename_are_saved(self):
+        w = self.songs_window()
+        a, b = self.songs["a.mp3"], self.songs["b.mp3"]
+        w.table.item(w.row_of[a], songs_window.ON).setCheckState(Qt.Unchecked)  # the person unticks On
+        _pump()
+        self.assertEqual(catalog.load(self.csv)[a]["enabled"], "no")
+        w.table.item(w.row_of[b], songs_window.TITLE).setText("  Beautiful   Savior ")  # types a title
+        _pump()
+        self.assertEqual(catalog.load(self.csv)[b]["title"], "Beautiful Savior")
+        self.assertEqual(w.table.item(w.row_of[b], songs_window.TITLE).text(), "Beautiful Savior")
+        self.assertEqual(w.status.text(), "3 songs, 1 on")
+        w.table.selectRow(w.row_of[a])
+        w.table.selectRow(w.row_of[a])
+        self.assertEqual(w.selected(), [a])
+        w.set_on(True)
+        self.assertEqual(catalog.load(self.csv)[a]["enabled"], "yes")
+        self.assertEqual(w.selected(), [a])  # the selection is kept when the list is filled again
+
+    def wizard(self, **cfg):
+        base = {"broadcast_name": "St. John Radio", "target_minutes": 60, "tolerance_seconds": 30,
+                "song_folders": [self.dir.name], "patriotic_holidays": ["memorial"]}
+        w = setup_wizard.SetupWizard(None, {**base, **cfg}, first_run=False)
+        self.addCleanup(w.done, 0)
+        return w
+
+    def test_settings_collect(self):
+        w = self.wizard(theme="dark", keep_me=7)
+        c = w.collect()
+        self.assertEqual((c["broadcast_name"], c["target_minutes"], c["tolerance_seconds"]), ("St. John Radio", 60, 30))
+        self.assertEqual((c["theme"], c["keep_me"], c["song_folders"]), ("dark", 7, [self.dir.name]))
+        self.assertEqual(c["patriotic_holidays"], ["memorial"])
+        w.minutes.setText("45")
+        w.theme.setCurrentIndex(ui.THEMES.index("light"))
+        w.holidays["veterans"].setChecked(True)
+        w.end_answer.setText("")
+        c = w.collect()
+        self.assertEqual((c["target_minutes"], c["theme"], c["end_answer_phrase"]), (45, "light", ""))
+        self.assertEqual(c["patriotic_holidays"], ["memorial", "veterans"])
+
+    def test_settings_refuse_bad_values(self):
+        w = self.wizard()
+        w.name.setText("St. John: Radio")
+        self.assertRaises(ValueError, w.collect)
+        w.name.setText("St. John Radio")
+        w.minutes.setText("an hour")
+        self.assertRaises(ValueError, w.collect)
+        w.minutes.setText("60")
+        w.intro.setText(os.path.join(self.dir.name, "missing.mp3"))
+        self.assertRaises(ValueError, w.collect)
+        w.go(len(w.pages) - 1)  # the last page says what is wrong
+        self.assertFalse(w.done_ok)
+        w.intro.setText("")
+        w.go(len(w.pages) - 1)
+        self.assertTrue(w.done_ok)
+
+    def test_settings_save(self):
+        saved = []
+        w = self.wizard()
+        w.on_done = saved.append
+        w.name.setText("Grace Radio")
+        with mock.patch.object(setup_wizard.builder, "save_config") as save:
+            w.finish()
+        self.assertEqual(save.call_args[0][0]["broadcast_name"], "Grace Radio")
+        self.assertTrue(save.call_args[0][0]["setup_done"])
+        self.assertEqual(saved[0]["broadcast_name"], "Grace Radio")
+
+    def review(self, keys, **more):
+        found = {"title": "Holy, Holy, Holy", "seasons": ["pentecost"], "how": "lyrics", "sure": 0.9, "hymn": "",
+                 "duration": 200.0, "words": 40, "no_words": False, "heard": "holy holy holy", "lead": 0.5,
+                 "tail": 1.0}
+        closed = []
+        with mock.patch.object(add_songs, "analyse", return_value=dict(found)), \
+                mock.patch.object(add_songs, "hymn_lists", return_value=[]):
+            w = add_songs.SongReview(None, keys, self.csv, [self.dir.name], on_done=closed.append, **more)
+            self.addCleanup(lambda: w.isVisible() and w.done(0))
+            _pump(w.save_btn.isEnabled)
+        self.assertTrue(w.save_btn.isEnabled())
+        return w, closed
+
+    def test_identify_review_saves_titles(self):
+        b, c = self.songs["b.mp3"], self.songs["c.mp3"]
+        w, closed = self.review([b, c], mode="identify", rows=catalog.load(self.csv))
+        self.assertEqual(w.table.item(0, add_songs.TITLE).text(), "Holy, Holy, Holy")
+        self.assertEqual(w.table.item(0, add_songs.SEASONS).text(), "Pentecost")
+        w.table.item(1, add_songs.USE).setCheckState(Qt.Unchecked)  # the person does not want the second one
+        w.table.item(0, add_songs.TITLE).setText("Holy Holy Holy")  # and corrects the first title
+        _pump()
+        self.assertEqual(w.result[b]["how"], "title you typed")
+        w.save()
+        rows = catalog.load(self.csv)
+        self.assertEqual((rows[b]["title"], rows[b]["seasons"]), ("Holy Holy Holy", "pentecost"))
+        self.assertEqual(rows[c]["title"], "Organ")
+        self.assertEqual(closed, [None])
+
+    def test_add_review_copies_the_song(self):
+        new = os.path.join(self.dir.name, "incoming", "new song.mp3")
+        os.makedirs(os.path.dirname(new))
+        with open(new, "wb") as fh:
+            fh.write(b"song")
+        dest = os.path.join(self.dir.name, "library")  # inside a song folder: no new folder to remember
+        w, closed = self.review([new], mode="add")
+        w.dest.setEditText(dest)
+        w.save()
+        row = catalog.load(self.csv)[os.path.join(dest, "new song.mp3")]
+        self.assertEqual((row["title"], row["enabled"], row["start_silence"]), ("Holy, Holy, Holy", "yes", "0.50"))
+        self.assertTrue(os.path.isfile(os.path.join(dest, "new song.mp3")))
+        self.assertEqual(closed, [[self.dir.name]])
+
+    def test_review_cancel_saves_nothing(self):
+        b = self.songs["b.mp3"]
+        w, closed = self.review([b], mode="identify", rows=catalog.load(self.csv))
+        w.reject()
+        self.assertEqual(catalog.load(self.csv)[b]["title"], "")
+        self.assertEqual(closed, [None])
 
 
 class ImportSongList(unittest.TestCase):

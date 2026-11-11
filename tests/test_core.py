@@ -797,6 +797,26 @@ class SongsWindowHelpers(unittest.TestCase):
         self.assertTrue(m(on, "All songs", "grace"))
         self.assertFalse(m(on, "All songs", "organ"))
 
+    def test_public_domain_and_permission(self):
+        pd = {"file": "a.mp3", "public_domain": "yes"}
+        cc = {"file": "b.mp3", "public_domain": "allowed"}
+        licensed = {"file": "c.mp3", "public_domain": "no", "permission": "CCLI Streaming License 123456"}
+        no = {"file": "d.mp3", "public_domain": "no"}
+        check = {"file": "e.mp3", "public_domain": "check"}
+        typed_only = {"file": "f.mp3", "permission": "letter from the writer"}
+        new = {"file": "g.mp3"}
+        songs = (pd, cc, licensed, no, check, typed_only, new)
+        m = songs_window.matches
+        self.assertEqual([songs_window.pd_label(r) for r in songs],
+                         ["Yes", "Allowed", "Allowed", "No", "Check", "Allowed", ""])
+        self.assertEqual([m(r, "Public domain", "") for r in songs], [True, False, False, False, False, False, False])
+        self.assertEqual([m(r, "Allowed to broadcast", "") for r in songs],
+                         [True, True, True, False, False, True, False])
+        self.assertEqual([m(r, "Needs permission", "") for r in songs],
+                         [False, False, False, True, True, False, False])
+        self.assertEqual([m(r, "Not looked up", "") for r in songs],
+                         [False, False, False, False, False, False, True])
+
 
 try:
     import setup_wizard  # noqa: E402  (needs tkinter)
@@ -939,6 +959,25 @@ class AddSongsHelpers(unittest.TestCase):
         self.assertEqual(r["title"], "Amazing Grace")
         cw.assert_not_called()  # enough words heard already: no second listen
 
+    def test_bulk_scan_keeps_titles_and_seasons_and_saves_public_domain(self):
+        heard = ("amazing grace how sweet the sound that saved a wretch like me", 12)
+        with mock.patch.object(add_songs.audio, "duration", return_value=200.0), \
+                mock.patch.object(add_songs.identify, "read_tags", return_value={"title": "Track Title"}), \
+                mock.patch.object(add_songs.identify, "heard_words", return_value=heard):
+            r = add_songs.analyse("x/song.mp3", HYMNS, known_title="Our Hymn", known_seasons=["lent"])
+            self.assertEqual((r["title"], r["seasons"]), ("Our Hymn", ["lent"]))
+            self.assertIn('the words sound like "Amazing Grace"', r["how"])
+            r = add_songs.analyse("x/song.mp3", HYMNS, known_title="Amazing Grace", known_seasons=[])
+            self.assertEqual((r["seasons"], r["how"]), ([], "title and seasons kept"))
+        with mock.patch.object(add_songs.pdlookup, "lookup",
+                               return_value={"status": "yes", "note": "Public domain.", "source": "x"}):
+            pd = add_songs.public_domain("Amazing Grace", [])
+        row = {"file": "x/song.mp3", "permission": "CCLI"}
+        add_songs.SongReview.save_pd(row, {"pd": pd})
+        self.assertEqual((row["public_domain"], row["pd_note"], row["permission"]), ("yes", "Public domain.", "CCLI"))
+        add_songs.SongReview.save_pd(row, {"pd": None})  # renamed and not looked up again: left as it was
+        self.assertEqual(row["public_domain"], "yes")
+
 
 class ServiceDate(unittest.TestCase):
     def test_default_is_the_coming_sunday(self):
@@ -1041,6 +1080,17 @@ class ImportSongList(unittest.TestCase):
                          ("Old Title", "easter", "no", "100"))
         self.assertEqual(catalog.load(self.csv)[joy]["title"], "Joy to the World")  # saved
 
+    def test_import_permission(self):
+        full = os.path.join(self.songs, "Hymn.mp3")
+        p = self.write(f"file,permission\n{full},CCLI Streaming License 123456\n")
+        rows, *_ = catalog.import_csv(self.csv, p, [self.songs], lambda f: 1.0, log=lambda m: None)
+        self.assertEqual(rows[full]["permission"], "CCLI Streaming License 123456")
+        self.assertTrue(catalog.cleared(rows[full]))
+        p = self.write(f"file,title,permission\n{full},Hymn,\n")  # empty cell keeps it
+        rows, *_ = catalog.import_csv(self.csv, p, [self.songs], lambda f: 1.0, log=lambda m: None)
+        self.assertEqual(catalog.load(self.csv)[full]["permission"], "CCLI Streaming License 123456")
+        self.assertFalse(catalog.cleared({"public_domain": "check"}))
+
     def test_excel_windows_encoding_and_no_file_column(self):
         p = self.write("file,title\nHymn.mp3,Café Hymn\n", encoding="cp1252")
         rows, added, _u, problems = catalog.import_csv(self.csv, p, [self.songs], lambda f: 1.0, log=lambda m: None)
@@ -1051,10 +1101,11 @@ class ImportSongList(unittest.TestCase):
 
 
 def _item(label, desc="Christian hymn", published=None, written=None, classes=("musical work/composition",),
-          aliases=(), statuses=(), creators_died=None, translators=(), translators_died=None):
+          aliases=(), statuses=(), creators_died=None, translators=(), translators_died=None, licenses=()):
     return {"id": "Q1", "label": label, "desc": desc, "aliases": list(aliases), "classes": list(classes),
             "published": published, "written": written, "statuses": set(statuses),
-            "creators_died": creators_died, "translators": list(translators), "translators_died": translators_died}
+            "creators_died": creators_died, "translators": list(translators), "translators_died": translators_died,
+            "licenses": list(licenses)}
 
 
 class PublicDomain(unittest.TestCase):
@@ -1130,6 +1181,25 @@ class PublicDomain(unittest.TestCase):
         # Written after the cutoff: it cannot have been published before it.
         self.assertEqual(self.judge("New", [_item("New", written=1990)])["status"], "no")
 
+    def test_free_license_allows_broadcast(self):
+        cc = "Creative Commons Attribution-ShareAlike 4.0 International"
+        r = self.judge("New Song", [_item("New Song", published=2015, licenses=[cc])])
+        self.assertEqual(r["status"], "allowed")
+        self.assertIn(cc, r["note"])
+        self.assertEqual(self.judge("New Song", [_item("New Song", licenses=["CC0"])])["status"], "allowed")
+        nc = self.judge("New Song", [_item("New Song", published=2015,
+                                           licenses=["Creative Commons Attribution-NonCommercial 4.0"])])
+        self.assertEqual(nc["status"], "check")
+        # Another kind of license is no permission; public domain stays Yes.
+        self.assertEqual(self.judge("New Song", [_item("New Song", published=2015,
+                                                       licenses=["proprietary license"])])["status"], "no")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", published=1800, licenses=["CC0"])])["status"], "yes")
+        self.assertEqual(self.pd.STATUS_LABELS["allowed"], "Allowed")
+        # Matched only without the part in brackets: Check, as for Yes.
+        allowed = lambda t, today=None: {"status": "allowed", "note": "Allowed: released under CC0.", "source": "x"} \
+            if t == "New Song" else None
+        self.assertEqual(self.pd.lookup("New Song (Live)", sources=[allowed])["status"], "check")
+
     def test_lookup_order_and_fallbacks(self):
         old = lambda t, today=None: {"status": "yes", "note": "Public domain (published 1779).", "source": "x"} \
             if t == "Amazing Grace" else None
@@ -1177,8 +1247,11 @@ class PublicDomain(unittest.TestCase):
             "desc": {"value": "Christian hymn"}, "aliases": {"value": ""}, "classes": {"value": "musical work/composition"},
             "published": {"value": "1779-01-01T00:00:00Z"}, "created": {"value": "1772-01-01T00:00:00Z"},
             "statuses": {"value": "http://www.wikidata.org/entity/Q19652"}, "creatorsDied": {"value": "1807-12-21T00:00:00Z"},
+            "licenses": {"value": "CC0|Creative Commons Attribution 4.0 International"},
         }]}}
         item = self.pd.parse(data)[0]
+        self.assertEqual(item["licenses"], ["CC0", "Creative Commons Attribution 4.0 International"])
+        self.assertIn("wdt:P275", self.pd.QUERY)
         self.assertEqual((item["id"], item["published"], item["written"], item["creators_died"]),
                          ("Q210211", 1779, 1772, 1807))
         self.assertEqual(item["statuses"], {"Q19652"})

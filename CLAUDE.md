@@ -1,8 +1,8 @@
 # Notes for Claude
 
-## Remind the maintainer: planned for 1.0.5
+## Remind the maintainer: planned for 1.0.6
 
-At the start of any session that works toward the 1.0.5 release, remind the maintainer about this
+At the start of any session that works toward the 1.0.6 release, remind the maintainer about this
 item. Remove it from this file once it is built.
 
 - **Option C, recording copyright warning (from file tags).** When songs are added, identified or

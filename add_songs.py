@@ -2,7 +2,10 @@
 checks them in a table, and then they are saved to the song list.
 
 mode "add":      new files. They are copied into one of the song folders on Save.
-mode "identify": songs already in the list (for example the ones with no title yet).
+mode "identify": songs already in the list (for example the ones with no title yet), or all of
+                 them in one bulk scan. keep=True keeps the title and seasons a song already has.
+check_pd=True also looks up whether each song is in the public domain (pdlookup.py), with the
+title found, and saves the answer with the song.
 For each song the app reads its tags, listens to the start of it, and matches the words against
 the hymn list (identify.py). It also measures the length, the silence at the start and end, and
 whether it has words: a song with no words is added turned off.
@@ -18,12 +21,14 @@ import audio
 import catalog
 import identify
 import paths
+import pdlookup
 import prelude
 import songs_window
 
 AUDIO = (("Audio files", "*.mp3 *.wav *.m4a *.flac *.ogg *.wma *.aac"), ("All files", "*.*"))
-COLUMNS = (("use", "Use", 40, "center"), ("title", "Title", 230, "w"), ("seasons", "Seasons", 130, "w"),
-           ("how", "Found by", 190, "w"), ("heard", "Words heard", 240, "w"), ("file", "File", 160, "w"))
+COLUMNS = (("use", "Use", 40, "center"), ("title", "Title", 220, "w"), ("seasons", "Seasons", 120, "w"),
+           ("how", "Found by", 180, "w"), ("pd", "Public domain", 95, "center"), ("heard", "Words heard", 210, "w"),
+           ("file", "File", 140, "w"))
 
 
 def hymn_lists():
@@ -42,24 +47,39 @@ def unique_path(folder, name):
     return dst
 
 
-def analyse(path, hymns, models_folder="", min_words=catalog.MIN_WORDS, get_edges=None, known_title=""):
-    """Everything the review needs about one song (runs in the background)."""
+def analyse(path, hymns, models_folder="", min_words=catalog.MIN_WORDS, get_edges=None, known_title="",
+            known_seasons=None):
+    """Everything the review needs about one song (runs in the background).
+
+    known_seasons (a list) with known_title: the song keeps both; the lyrics match is only told."""
     dur = audio.duration(path)
     tags = identify.read_tags(path)
     heard, sure = identify.heard_words(path, dur, models_folder)
     words = sure if sure >= min_words else max(sure, prelude.count_words(path, dur, models_folder))
     lead, tail = get_edges(path) if get_edges else (None, None)
     found = identify.identify(path, hymns, tags, heard, known_title)
+    if known_title and known_seasons is not None:
+        hint = ""
+        if found["hymn"] and pdlookup.norm(found["hymn"]) != pdlookup.norm(known_title):
+            hint = f'; the words sound like "{found["hymn"]}"'
+        found = {**found, "seasons": list(known_seasons), "how": "title and seasons kept" + hint}
     return {**found, "duration": dur, "words": words, "no_words": words < min_words,
             "heard": heard, "lead": lead, "tail": tail}
 
 
+def public_domain(title, hymns):
+    """{'status', 'note'} for the title, or raises pdlookup.LookupError_ (offline)."""
+    r = pdlookup.lookup(title, hymns)
+    return {"status": r["status"], "note": r["note"]}
+
+
 class SongReview:
     def __init__(self, parent, items, csv_path, folders, mode="add", min_words=catalog.MIN_WORDS,
-                 models_folder="", get_edges=None, rows=None, on_done=None):
+                 models_folder="", get_edges=None, rows=None, on_done=None, keep=False, check_pd=False):
         self.items, self.path, self.folders, self.mode = list(items), csv_path, list(folders), mode
         self.min_words, self.models_folder, self.get_edges = min_words, models_folder, get_edges
-        self.rows, self.on_done = rows or {}, on_done
+        self.rows, self.on_done, self.keep, self.check_pd = rows or {}, on_done, keep, check_pd
+        self.hymns, self.pd_offline = [], False
         self.result, self.use = {}, {}
         self.q, self.stop = queue.Queue(), False
         self.win = w = tk.Toplevel(parent)
@@ -95,7 +115,7 @@ class SongReview:
         sb.pack(side="right", fill="y")
         for i, item in enumerate(self.items):
             self.use[item] = True
-            self.tree.insert("", "end", iid=item, values=("✔", "(listening ...)", "", "", "",
+            self.tree.insert("", "end", iid=item, values=("✔", "(listening ...)", "", "", "", "",
                                                           os.path.basename(item)))
         self.tree.bind("<Button-1>", self.click)
         self.tree.bind("<Double-1>", self.double_click)
@@ -125,16 +145,34 @@ class SongReview:
         except Exception as e:  # noqa: BLE001
             hymns = []
             self.q.put(("note", f"Could not read the hymn list: {e}"))
+        self.hymns = hymns
         for i, item in enumerate(self.items):
             if self.stop:
                 return
             self.q.put(("progress", i))
+            row = self.rows.get(item) or {}
+            known = (row.get("title") or "").strip() if self.keep else ""
+            seasons = [t.strip().lower() for t in (row.get("seasons") or "").split(";") if t.strip()]
             try:
-                r = analyse(item, hymns, self.models_folder, self.min_words, self.get_edges)
-                self.q.put(("done", item, r))
+                r = analyse(item, hymns, self.models_folder, self.min_words, self.get_edges,
+                            known_title=known, known_seasons=seasons if known else None)
             except Exception as e:  # noqa: BLE001
                 self.q.put(("error", item, str(e)))
+                continue
+            self.q.put(("done", item, r))
+            if self.check_pd and not self.pd_offline:
+                self.look_up(item, r["title"])
         self.q.put(("finished",))
+
+    def look_up(self, item, title):
+        """Public-domain lookup for one song (in the background). Offline: told once, then skipped."""
+        try:
+            self.q.put(("pd", item, title, public_domain(title, self.hymns)))
+        except pdlookup.LookupError_ as e:
+            if not self.pd_offline:
+                self.pd_offline = True
+                self.q.put(("note", f"{e}\n\nThe songs are still identified; look them up later with "
+                                    "Public domain... in the Songs window."))
 
     def poll(self):
         if not self.win.winfo_exists():
@@ -147,9 +185,14 @@ class SongReview:
             elif msg[0] == "done":
                 self.result[msg[1]] = msg[2]
                 self.refresh(msg[1])
+            elif msg[0] == "pd":
+                _, item, title, pd = msg
+                if item in self.result and self.result[item]["title"] == title:  # not renamed since
+                    self.result[item]["pd"] = pd
+                    self.refresh(item)
             elif msg[0] == "error":
                 self.use[msg[1]] = False
-                self.tree.item(msg[1], values=("", "(could not read)", "", msg[2][:80], "", os.path.basename(msg[1])),
+                self.tree.item(msg[1], values=("", "(could not read)", "", msg[2][:80], "", "", os.path.basename(msg[1])),
                                tags=("off",))
             elif msg[0] == "note":
                 messagebox.showwarning("Songs", msg[1], parent=self.win)
@@ -158,8 +201,7 @@ class SongReview:
                 n = sum(1 for k in self.items if self.use.get(k) and k in self.result)
                 self.status.config(text=f"Done. {n} song(s) ticked.")
                 self.save_btn.state(["!disabled"])
-                return
-        self.win.after(150, self.poll)
+        self.win.after(150, self.poll)  # goes on: a renamed song is looked up again
 
     def refresh(self, item):
         r = self.result.get(item)
@@ -168,7 +210,9 @@ class SongReview:
         how = r["how"] + ("; no words: added turned off" if r["no_words"] and self.mode == "add" else "")
         seasons = songs_window.seasons_text({"seasons": ";".join(r["seasons"])})
         tags = ("off",) if not self.use[item] else (("unsure",) if r["sure"] < 0.6 else ())
-        self.tree.item(item, values=("✔" if self.use[item] else "", r["title"], seasons, how,
+        pd = pdlookup.STATUS_LABELS.get(r["pd"]["status"], "") if r.get("pd") else (
+            "..." if self.check_pd and not self.pd_offline else "")
+        self.tree.item(item, values=("✔" if self.use[item] else "", r["title"], seasons, how, pd,
                                      r["heard"][:120] or "(no words heard)", os.path.basename(item)), tags=tags)
 
     # ---- editing ------------------------------------------------------------------------
@@ -212,9 +256,12 @@ class SongReview:
             if not ent.winfo_exists() or getattr(ent, "done", False):
                 return
             ent.done = True
-            if keep and ent.get().strip():
-                self.result[key].update(title=ent.get().strip(), how="title you typed", sure=1.0)
+            if keep and ent.get().strip() and ent.get().strip() != self.result[key]["title"]:
+                title = ent.get().strip()
+                self.result[key].update(title=title, how="title you typed", sure=1.0, pd=None)
                 self.refresh(key)
+                if self.check_pd and not self.pd_offline:  # the answer was for the old title
+                    threading.Thread(target=self.look_up, args=(key, title), daemon=True).start()
             ent.destroy()
 
         ent.bind("<Return>", lambda e: done(True))
@@ -287,6 +334,7 @@ class SongReview:
                          "words": str(r["words"]),
                          "start_silence": "" if r["lead"] is None else f"{r['lead']:.2f}",
                          "end_silence": "" if r["tail"] is None else f"{r['tail']:.2f}"}
+            self.save_pd(rows[dst], r)
         catalog.save(self.path, rows)
         folders = list(self.folders)
         if not any(os.path.normcase(os.path.abspath(dest)).startswith(os.path.normcase(os.path.join(os.path.abspath(f), "")))
@@ -303,8 +351,15 @@ class SongReview:
                 rows[k]["seasons"] = ";".join(self.result[k]["seasons"])
                 if not (rows[k].get("words") or "").strip():
                     rows[k]["words"] = str(self.result[k]["words"])
+                self.save_pd(rows[k], self.result[k])
         catalog.save(self.path, rows)
         return []
+
+    @staticmethod
+    def save_pd(row, result):
+        """The public-domain answer found during the scan, if any (a permission typed is kept)."""
+        if result.get("pd"):
+            row["public_domain"], row["pd_note"] = result["pd"]["status"], result["pd"]["note"]
 
     def cancel(self):
         self.stop = True

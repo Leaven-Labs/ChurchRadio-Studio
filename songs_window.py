@@ -19,14 +19,19 @@ import pdlookup
 SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epiphany", "lent": "Lent",
                  "holyweek": "Holy Week", "easter": "Easter", "pentecost": "Pentecost",
                  churchyear.PATRIOTIC: "Patriotic"}
-SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Not public domain", "Not looked up")
+SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Allowed to broadcast", "Needs permission",
+        "Not looked up")
 COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 280, "w"), ("seasons", "Seasons", 150, "w"),
            ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("pd", "Public domain", 105, "center"),
            ("file", "File", 200, "w"))
 PD_ABOUT = ("The app looks up each song's title on Wikidata (free, open data) and says whether the song "
             "(its words and tune) is in the public domain in the US: published before {first}.\n\n"
-            "Yes = public domain. No = under copyright. Check = the original is old, but a newer version "
-            "(for example an English translation) may be the one sung. ? = not found.\n\n"
+            "Yes = public domain. Allowed = under copyright, but released under a license that lets anyone "
+            "broadcast it (Creative Commons), or you gave a permission. No = under copyright. Check = the "
+            "original is old, but a newer version (for example an English translation) may be the one "
+            "sung. ? = not found.\n\n"
+            "If you have permission for a song (a streaming or radio license such as CCLI, or the writer's "
+            "OK), select it and click Permission... to mark it Allowed.\n\n"
             "This is a guide, not legal advice. It is about the song, not the recording: a modern "
             "recording or arrangement of an old hymn is still protected.")
 
@@ -38,6 +43,14 @@ def title_of(row):
 def seasons_text(row):
     tags = [t.strip().lower() for t in (row.get("seasons") or "").split(";") if t.strip()]
     return ", ".join(SEASON_LABELS.get(t, t) for t in tags if t != "general") or "General"
+
+
+def pd_label(row):
+    """What the Public domain column shows: a typed permission shows as Allowed."""
+    pd = (row.get("public_domain") or "").strip().lower()
+    if (row.get("permission") or "").strip() and pd != "yes":
+        return pdlookup.STATUS_LABELS["allowed"]
+    return pdlookup.STATUS_LABELS.get(pd, "")
 
 
 def no_words(row, min_words=catalog.MIN_WORDS):
@@ -52,9 +65,12 @@ def matches(row, show, find, min_words=catalog.MIN_WORDS):
     if show == "No words" and not no_words(row, min_words):
         return False
     pd = (row.get("public_domain") or "").strip().lower()
-    if show == "Public domain" and pd != "yes" or show == "Not public domain" and pd not in ("no", "check"):
+    permission = bool((row.get("permission") or "").strip())
+    if show == "Public domain" and pd != "yes" or show == "Allowed to broadcast" and not catalog.cleared(row):
         return False
-    if show == "Not looked up" and pd:
+    if show == "Needs permission" and (pd not in ("no", "check") or permission):
+        return False
+    if show == "Not looked up" and (pd or permission):
         return False
     find = find.strip().lower()
     return not find or find in title_of(row).lower() or find in os.path.basename(row["file"]).lower()
@@ -103,6 +119,61 @@ def ask_seasons(parent, name, current, on_ok):
     return dlg
 
 
+def ask_identify(parent, rows, selected, on_ok):
+    """Which songs to identify: the selected ones, the ones with no title, or all of them (a bulk
+    scan). Calls on_ok(keys, keep titles and seasons already set, also check public domain)."""
+    untitled = [k for k, r in rows.items() if not (r.get("title") or "").strip()]
+    groups = [("selected", f"The selected songs ({len(selected)})", list(selected)),
+              ("untitled", f"Songs with no title ({len(untitled)})", untitled),
+              ("all", f"All songs ({len(rows)}): a bulk scan", list(rows))]
+    groups = [g for g in groups if g[2]]
+    if not groups:
+        messagebox.showinfo("Identify", "There are no songs in the list yet.", parent=parent)
+        return None
+    dlg = tk.Toplevel(parent)
+    dlg.title("Identify songs")
+    dlg.transient(parent)
+    dlg.resizable(False, False)
+    ttk.Label(dlg, text="The app listens to the start of each song and suggests its title and seasons. "
+                        "You check the suggestions before anything is saved.",
+              wraplength=380, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
+    which = tk.StringVar(value=groups[0][0])
+    for key, label, _keys in groups:
+        ttk.Radiobutton(dlg, text=label, value=key, variable=which).pack(anchor="w", padx=20)
+    keep = tk.BooleanVar(value=True)
+    check_pd = tk.BooleanVar(value=True)
+    ttk.Checkbutton(dlg, text="Keep the titles and seasons songs already have\n(only songs with no title "
+                              "get a suggestion)", variable=keep).pack(anchor="w", padx=12, pady=(10, 0))
+    ttk.Checkbutton(dlg, text="Also check whether each song is in the public domain\n(needs the internet)",
+                    variable=check_pd).pack(anchor="w", padx=12, pady=(4, 0))
+    ttk.Label(dlg, text="Listening takes a few seconds per song: a bulk scan of many songs can take a "
+                        "while. Cancel in the next window keeps nothing.", foreground="#555555",
+              wraplength=380, justify="left").pack(anchor="w", padx=12, pady=(8, 0))
+    btns = ttk.Frame(dlg)
+    btns.pack(fill="x", padx=12, pady=12)
+
+    def ok():
+        keys = next(g[2] for g in groups if g[0] == which.get())
+        k, pd = keep.get(), check_pd.get()
+        dlg.destroy()
+        on_ok(keys, k, pd)
+
+    def cancel():
+        dlg.destroy()
+        parent.grab_set()  # keep the main window blocked while Songs is open
+
+    ttk.Button(btns, text="Start", command=ok).pack(side="right")
+    ttk.Button(btns, text="Cancel", command=cancel).pack(side="right", padx=6)
+    dlg.bind("<Return>", lambda e: ok())
+    dlg.bind("<Escape>", lambda e: cancel())
+    dlg.protocol("WM_DELETE_WINDOW", cancel)
+    dlg.update_idletasks()
+    dlg.geometry(f"+{parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_width()) // 2}"
+                 f"+{parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_height()) // 3}")
+    dlg.grab_set()
+    return dlg
+
+
 class SongsWindow:
     def __init__(self, parent, csv_path, folders, min_words=catalog.MIN_WORDS, get_edges=None,
                  models_folder="", on_folders=None):
@@ -123,7 +194,7 @@ class SongsWindow:
         ttk.Entry(top, textvariable=self.find, width=24).pack(side="left", padx=(4, 12))
         ttk.Label(top, text="Show:").pack(side="left")
         self.show = tk.StringVar(value=SHOW[0])
-        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=17, textvariable=self.show)
+        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=20, textvariable=self.show)
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self.fill())
         self.find_btn = ttk.Button(top, text="Look for new songs", command=self.rescan)
@@ -163,6 +234,7 @@ class SongsWindow:
         ttk.Button(bottom, text="Identify...", command=self.identify_selected).pack(side="left", padx=(12, 0))
         self.pd_btn = ttk.Button(bottom, text="Public domain...", command=self.public_domain)
         self.pd_btn.pack(side="left", padx=4)
+        ttk.Button(bottom, text="Permission...", command=self.permission_selected).pack(side="left")
         ttk.Button(bottom, text="Close", command=w.destroy).pack(side="right")
         self.status = ttk.Label(bottom, text="")
         self.status.pack(side="right", padx=12)
@@ -193,7 +265,7 @@ class SongsWindow:
 
     def values(self, r):
         w = (r.get("words") or "").strip()
-        pd = pdlookup.STATUS_LABELS.get((r.get("public_domain") or "").strip().lower(), "")
+        pd = pd_label(r)
         return ("✔" if catalog.is_on(r) else "", title_of(r), seasons_text(r),
                 audio.fmt(catalog._duration(r)), w if w else "-", pd, os.path.basename(r["file"]))
 
@@ -316,17 +388,20 @@ class SongsWindow:
                                  get_edges=self.get_edges, on_done=self.after_review)
 
     def identify_selected(self):
-        """Suggest titles and seasons for the selected songs (or every song without a title)."""
+        """Suggest titles and seasons for songs: the selected ones, those without a title, or all of
+        them (a bulk scan), and if asked, look up whether they are in the public domain as well."""
+        ask_identify(self.win, self.rows, self.selected(), self.run_identify)
+
+    def run_identify(self, keys, keep, check_pd):
         import add_songs
-        keys = self.selected() or [k for k, r in self.rows.items() if not (r.get("title") or "").strip()]
         keys = [k for k in keys if os.path.exists(self.rows[k]["file"])]
         if not keys:
-            messagebox.showinfo("Identify", "Select the songs to identify (every song already has a title).",
-                                parent=self.win)
+            messagebox.showinfo("Identify", "None of these song files could be found.", parent=self.win)
+            self.regrab()
             return
         add_songs.SongReview(self.win, keys, self.path, self.folders, mode="identify",
                              min_words=self.min_words, models_folder=self.models_folder,
-                             rows=self.rows, on_done=self.after_review)
+                             rows=self.rows, on_done=self.after_review, keep=keep, check_pd=check_pd)
 
     def after_review(self, folders=None):
         if folders is not None and folders != self.folders:
@@ -395,11 +470,38 @@ class SongsWindow:
         dlg.grab_set()
 
     def show_note(self):
-        """Under the list: why the selected song is (or is not) in the public domain."""
+        """Under the list: why the selected song is (or is not) in the public domain, and the
+        permission typed for it."""
         keys = self.selected()
         r = self.rows.get(keys[0]) if len(keys) == 1 else None
         note = (r.get("pd_note") or "").strip() if r else ""
-        self.note.config(text=f"Public domain: {note}" if note else "")
+        permission = (r.get("permission") or "").strip() if r else ""
+        text = [f"Public domain: {note}"] if note else []
+        if permission:
+            text.append(f"Allowed to broadcast: {permission}")
+        self.note.config(text="\n".join(text))
+
+    def permission_selected(self):
+        """Type why the church may broadcast the selected songs (a license, a letter). Empty clears it."""
+        keys = self.selected()
+        if not keys:
+            messagebox.showinfo("Permission", "Select the songs you have permission to broadcast.", parent=self.win)
+            return
+        from tkinter import simpledialog
+        name = title_of(self.rows[keys[0]]) if len(keys) == 1 else f"these {len(keys)} songs"
+        text = simpledialog.askstring(
+            "Permission", f"Why may you broadcast {name}?\n\nFor example: CCLI Streaming License 123456, "
+            "your station's radio license, or \"email from the writer, 3 May 2026\".\n"
+            "The song is then shown as Allowed. Leave it empty to take the permission off.",
+            initialvalue=(self.rows[keys[0]].get("permission") or ""), parent=self.win)
+        self.regrab()
+        if text is None:
+            return
+        for k in keys:
+            self.rows[k]["permission"] = " ".join(text.split())
+        if self.save():
+            self.fill()
+            self.show_note()
 
     def public_domain(self):
         """Look up whether the selected songs (or every song not looked up yet) are in the public domain."""

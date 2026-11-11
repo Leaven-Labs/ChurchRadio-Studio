@@ -24,8 +24,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build .exe on Windows
+  windows:
+    name: Windows installer
     runs-on: windows-latest
 
     env:
@@ -285,52 +285,338 @@ jobs:
           Start-Process -FilePath $un.FullName -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" | Out-Null
           Write-Host "Update test PASS: moved out of the old-name folder, shortcut, settings and song list kept."
 
-      - name: SHA-256 checksum
-        shell: pwsh
-        run: |
-          Get-FileHash dist\ChurchRadio-Studio-Setup.exe -Algorithm SHA256 | ForEach-Object {
-              "$($_.Hash)  ChurchRadio-Studio-Setup.exe" | Set-Content dist\SHA256SUMS.txt -Encoding ascii
-          }
-          Get-Content dist\SHA256SUMS.txt
-
       - name: Upload the installer as artifact (for pre-release inspection)
         uses: actions/upload-artifact@v4
         with:
-          name: churchradio-studio-setup
-          path: |
-            dist/ChurchRadio-Studio-Setup.exe
-            dist/SHA256SUMS.txt
+          name: churchradio-studio-windows
+          path: dist/ChurchRadio-Studio-Setup.exe
           retention-days: 30
 
-      # Release step runs ONLY for dispatch / tag pushes, never for a PR. The release text is
-      # .github/RELEASE_NOTES.md: update its "What's new" before each release.
-      - name: Create tag + GitHub release with the installer
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+  # ------------------------------------------------------------------
+  # Linux: the program folder with an LGPL ffmpeg, packed as a .tar.gz with install.sh (installs
+  # for the user, no root). Built on the oldest supported Ubuntu, so the program runs on the
+  # Linux versions of the last few years (it needs the glibc of the build system or newer).
+  # ------------------------------------------------------------------
+  linux:
+    name: Linux .tar.gz
+    runs-on: ubuntu-22.04
+
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Run unit tests (stop if any fail)
+        run: python -m unittest discover -s tests -v
+
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then tag="$INPUT_VERSION"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"
+          else tag="v0.0.0-dev$GITHUB_RUN_NUMBER"; fi
+          echo "CRS_TAG=$tag" >> "$GITHUB_ENV"
+          echo "CRS_VERSION=${tag#v}" >> "$GITHUB_ENV"
+          printf '%s' "${tag#v}" > version.txt
+          echo "Version: $tag"
+
+      - name: Build the program folder (PyInstaller)
+        run: |
+          pyinstaller ChurchRadio-Studio.spec
+          test -x dist/ChurchRadio-Studio/ChurchRadio-Studio || { echo "PyInstaller did not make the program"; exit 1; }
+          du -sh dist/ChurchRadio-Studio
+
+      # The same LGPL build source as Windows (BtbN/FFmpeg-Builds), with the same checks.
+      - name: Get ffmpeg (LGPL build)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $tag = $env:CRS_TAG
-          if (-not $tag) { throw "No tag/version determined. Provide one (e.g. v1.0.0)." }
+          set -euo pipefail
+          read -r name url < <(gh api repos/BtbN/FFmpeg-Builds/releases/tags/latest --jq \
+            '[.assets[] | select(.name | test("^ffmpeg-n[0-9]+\\.[0-9]+-latest-linux64-lgpl-[0-9]+\\.[0-9]+\\.tar\\.xz$"))]
+             | sort_by(.name | capture("^ffmpeg-n(?<a>[0-9]+)\\.(?<b>[0-9]+)") | [(.a|tonumber), (.b|tonumber)])
+             | last | "\(.name) \(.browser_download_url)"')
+          [ -n "$name" ] && [ "$name" != "null" ] || { echo "No LGPL linux64 ffmpeg build found in BtbN/FFmpeg-Builds 'latest'."; exit 1; }
+          echo "ffmpeg build: $name"
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/$name" "$url"
+          sha256sum "$RUNNER_TEMP/$name"
+          mkdir -p "$RUNNER_TEMP/ffmpeg-x" && tar -xJf "$RUNNER_TEMP/$name" -C "$RUNNER_TEMP/ffmpeg-x"
+          root=$(dirname "$(dirname "$(find "$RUNNER_TEMP/ffmpeg-x" -type f -name ffmpeg -path '*/bin/*' | head -1)")")
+          ff=dist/ChurchRadio-Studio/ffmpeg
+          mkdir -p "$ff"
+          cp "$root/bin/ffmpeg" "$root/bin/ffprobe" "$ff/"
+          cp "$root"/LICENSE* "$ff/" 2>/dev/null || true
+          printf '%s\n' \
+            "ffmpeg is free software licensed under the GNU Lesser General Public License (LGPL) 2.1 or later." \
+            "This copy is the LGPL Linux build $name from https://github.com/BtbN/FFmpeg-Builds" \
+            "(build scripts and the exact library versions are listed there)." \
+            "ffmpeg source code: https://ffmpeg.org/download.html  -- ChurchRadio Studio runs ffmpeg as a" \
+            "separate program; it is not changed." > "$ff/README-ffmpeg.txt"
+          tools/check_ffmpeg.sh "$ff/ffmpeg"
+
+      - name: Licenses, install script
+        run: |
+          d=dist/ChurchRadio-Studio
+          python tools/third_party_licenses.py "$d/licenses/THIRD-PARTY-LICENSES.txt"
+          grep -q faster-whisper "$d/licenses/THIRD-PARTY-LICENSES.txt" || { echo "The license list is missing faster-whisper."; exit 1; }
+          cp LICENSE "$d/licenses/LICENSE.txt"
+          cp tools/linux/install.sh "$d/install.sh"
+          chmod +x "$d/install.sh"
+
+      - name: Pack the .tar.gz
+        run: |
+          tar -C dist -czf dist/ChurchRadio-Studio-Linux-x86_64.tar.gz ChurchRadio-Studio
+          ls -l dist/ChurchRadio-Studio-Linux-x86_64.tar.gz
+
+      # Unpack the .tar.gz and install it as a user would, then test the installed program.
+      - name: Install and smoke test
+        run: |
+          set -euo pipefail
+          x=$(mktemp -d)
+          tar -xzf dist/ChurchRadio-Studio-Linux-x86_64.tar.gz -C "$x"
+          "$x/ChurchRadio-Studio/install.sh"
+          app="$HOME/.local/share/churchradio-studio"
+          test -f "$HOME/.local/share/applications/churchradio-studio.desktop" || { echo "No menu entry."; exit 1; }
+          test -f "$app/licenses/THIRD-PARTY-LICENSES.txt" || { echo "The licenses were not installed."; exit 1; }
+          tools/smoke_test.sh "$HOME/.local/bin/churchradio-studio" "$app/ffmpeg" \
+            "$HOME/.config/churchradio-studio" "$HOME/.cache/churchradio-studio/models" "$CRS_VERSION"
+          "$app/install.sh" --uninstall
+          test ! -e "$app" || { echo "Uninstall left the program behind."; exit 1; }
+          test -f "$HOME/.config/churchradio-studio/config.json" || { echo "Uninstall removed the settings."; exit 1; }
+
+      - name: Upload the .tar.gz as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: churchradio-studio-linux
+          path: dist/ChurchRadio-Studio-Linux-x86_64.tar.gz
+          retention-days: 30
+
+  # ------------------------------------------------------------------
+  # macOS (Apple silicon): ChurchRadio Studio.app with an LGPL ffmpeg, in a .dmg. No one publishes
+  # an LGPL-only macOS ffmpeg that can write MP3, so it is built here from the ffmpeg and LAME
+  # sources (both LGPL; LAME linked in statically, no Homebrew libraries) and cached. The app is
+  # signed ad hoc, not with an Apple Developer ID: the first start needs "Open Anyway".
+  # ------------------------------------------------------------------
+  macos:
+    name: macOS .dmg
+    runs-on: macos-14
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      FFMPEG_VERSION: "7.1.1"
+      LAME_VERSION: "3.100"
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pillow
+
+      - name: Run unit tests (stop if any fail)
+        run: python -m unittest discover -s tests -v
+
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then tag="$INPUT_VERSION"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"
+          else tag="v0.0.0-dev$GITHUB_RUN_NUMBER"; fi
+          echo "CRS_TAG=$tag" >> "$GITHUB_ENV"
+          echo "CRS_VERSION=${tag#v}" >> "$GITHUB_ENV"
+          printf '%s' "${tag#v}" > version.txt
+          echo "Version: $tag"
+
+      - name: Cached ffmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-mac
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-lame-${{ env.LAME_VERSION }}-macos12-arm64-v1
+
+      - name: Build ffmpeg (LGPL, with LAME for MP3)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/src" pre="$RUNNER_TEMP/prefix" out="$PWD/build/ffmpeg-mac"
+          mkdir -p "$src" "$pre" "$out"
+          cd "$src"
+          curl -fsSL --retry 5 -o lame.tar.gz "https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz"
+          curl -fsSL --retry 5 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+          shasum -a 256 lame.tar.gz ffmpeg.tar.xz
+          tar -xzf lame.tar.gz && tar -xJf ffmpeg.tar.xz
+          cd "lame-$LAME_VERSION"
+          sed -i '' '/lame_init_old/d' include/libmp3lame.sym   # the known macOS link fix (as Homebrew does)
+          ./configure --prefix="$pre" --disable-shared --enable-static --disable-frontend --disable-dependency-tracking
+          make -j"$(sysctl -n hw.ncpu)" && make install
+          cd "../ffmpeg-$FFMPEG_VERSION"
+          # --disable-autodetect: nothing from Homebrew is linked in; only macOS's own zlib.
+          ./configure --prefix="$pre" --disable-autodetect --enable-zlib --enable-libmp3lame \
+            --disable-ffplay --disable-doc --disable-debug --disable-network \
+            --extra-cflags="-I$pre/include" --extra-ldflags="-L$pre/lib"
+          make -j"$(sysctl -n hw.ncpu)" && make install
+          cp "$pre/bin/ffmpeg" "$pre/bin/ffprobe" "$out/"
+          cp COPYING.LGPLv2.1 "$out/LICENSE-ffmpeg-LGPL-2.1.txt"
+          cp LICENSE.md "$out/LICENSE-ffmpeg.md"
+          cp "../lame-$LAME_VERSION/COPYING" "$out/LICENSE-lame-LGPL.txt"
+          printf '%s\n' \
+            "ffmpeg is free software licensed under the GNU Lesser General Public License (LGPL) 2.1 or later." \
+            "This copy was built for ChurchRadio Studio from the unchanged sources of ffmpeg $FFMPEG_VERSION" \
+            "(https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz) and LAME $LAME_VERSION (LGPL, for MP3;" \
+            "https://lame.sourceforge.io), with no GPL parts. The build steps are in the 'macos' job of" \
+            "https://github.com/Leaven-Labs/ChurchRadio-Studio/blob/main/.github/workflows/release.yml." \
+            "ChurchRadio Studio runs ffmpeg as a separate program; it is not changed." > "$out/README-ffmpeg.txt"
+
+      - name: Check ffmpeg
+        run: |
+          set -euo pipefail
+          tools/check_ffmpeg.sh build/ffmpeg-mac/ffmpeg
+          for b in ffmpeg ffprobe; do
+            otool -L "build/ffmpeg-mac/$b"
+            if otool -L "build/ffmpeg-mac/$b" | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/)'; then
+              echo "$b links a library that is not part of macOS."; exit 1
+            fi
+            lipo -archs "build/ffmpeg-mac/$b"
+          done
+
+      - name: Build the app (PyInstaller)
+        run: |
+          pyinstaller ChurchRadio-Studio.spec
+          test -x "dist/ChurchRadio Studio.app/Contents/MacOS/ChurchRadio-Studio" || { echo "PyInstaller did not make the app"; exit 1; }
+
+      # ffmpeg and the licenses go in Contents/Resources (paths.resources_dir()). Adding files breaks
+      # PyInstaller's signature, so the whole app is signed again (ad hoc): a broken signature makes
+      # macOS call a downloaded app "damaged".
+      - name: Add ffmpeg and the licenses, sign ad hoc
+        run: |
+          set -euo pipefail
+          app="dist/ChurchRadio Studio.app"
+          res="$app/Contents/Resources"
+          mkdir -p "$res/ffmpeg" "$res/licenses"
+          cp build/ffmpeg-mac/* "$res/ffmpeg/"
+          python tools/third_party_licenses.py "$res/licenses/THIRD-PARTY-LICENSES.txt"
+          grep -q faster-whisper "$res/licenses/THIRD-PARTY-LICENSES.txt" || { echo "The license list is missing faster-whisper."; exit 1; }
+          cp LICENSE "$res/licenses/LICENSE.txt"
+          codesign --force --sign - "$res/ffmpeg/ffmpeg" "$res/ffmpeg/ffprobe"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Pack the .dmg
+        run: |
+          set -euo pipefail
+          stage=$(mktemp -d)
+          ditto "dist/ChurchRadio Studio.app" "$stage/ChurchRadio Studio.app"
+          ln -s /Applications "$stage/Applications"
+          for i in 1 2 3 4 5; do   # hdiutil is sometimes "busy" on CI machines
+            hdiutil create -volname "ChurchRadio Studio" -srcfolder "$stage" -ov -format UDZO \
+              dist/ChurchRadio-Studio-macOS.dmg && break
+            sleep $((i * 5))
+          done
+          test -f dist/ChurchRadio-Studio-macOS.dmg
+          ls -l dist/ChurchRadio-Studio-macOS.dmg
+
+      # Install from the .dmg as a user would (copy the app to /Applications), then test it.
+      - name: Install and smoke test
+        run: |
+          set -euo pipefail
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" dist/ChurchRadio-Studio-macOS.dmg
+          ditto "$mnt/ChurchRadio Studio.app" "/Applications/ChurchRadio Studio.app"
+          hdiutil detach "$mnt"
+          app="/Applications/ChurchRadio Studio.app"
+          codesign --verify --deep --strict "$app"
+          test -f "$app/Contents/Resources/licenses/THIRD-PARTY-LICENSES.txt" || { echo "The licenses are missing."; exit 1; }
+          tools/smoke_test.sh "$app/Contents/MacOS/ChurchRadio-Studio" "$app/Contents/Resources/ffmpeg" \
+            "$HOME/Library/Application Support/ChurchRadio Studio" "/Users/Shared/ChurchRadio Studio/models" "$CRS_VERSION"
+
+      - name: Upload the .dmg as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: churchradio-studio-macos
+          path: dist/ChurchRadio-Studio-macOS.dmg
+          retention-days: 30
+
+  # ------------------------------------------------------------------
+  # Release: ONLY for dispatch / tag pushes, never for a PR, and only when all three builds and
+  # their smoke tests passed. The release text is .github/RELEASE_NOTES.md: update its
+  # "What's new" before each release.
+  # ------------------------------------------------------------------
+  release:
+    name: Create tag + GitHub release
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the three builds
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: churchradio-studio-*
+          merge-multiple: true
+
+      - name: SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum ChurchRadio-Studio-Setup.exe ChurchRadio-Studio-macOS.dmg ChurchRadio-Studio-Linux-x86_64.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create tag + GitHub release with the downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then tag="$INPUT_VERSION"; else tag="$GITHUB_REF_NAME"; fi
+          [ -n "$tag" ] || { echo "No tag/version determined. Provide one (e.g. v1.0.0)."; exit 1; }
 
           # Never force-move an existing tag that points at a different commit.
-          if (git rev-parse -q --verify "refs/tags/$tag" 2>$null) {
-              $existing = git rev-list -n1 "refs/tags/$tag"
-              if ($existing -ne $env:GITHUB_SHA) {
-                  throw "Tag $tag already exists at $existing, not at $env:GITHUB_SHA. Refusing to move it."
-              }
-          } else {
-              git tag $tag
-              git push origin $tag
-          }
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            existing=$(git rev-list -n1 "refs/tags/$tag")
+            if [ "$existing" != "$GITHUB_SHA" ]; then
+              echo "Tag $tag already exists at $existing, not at $GITHUB_SHA. Refusing to move it."; exit 1
+            fi
+          else
+            git tag "$tag"
+            git push origin "$tag"
+          fi
 
-          $assets = @("dist/ChurchRadio-Studio-Setup.exe", "dist/SHA256SUMS.txt")
-          $release = gh release view $tag --json url 2>$null
-          if ($LASTEXITCODE -ne 0) {
-              gh release create $tag --title "ChurchRadio Studio $tag" --notes-file .github/RELEASE_NOTES.md --target $env:GITHUB_SHA
-          }
-          foreach ($a in $assets) {
-              gh release upload $tag $a --clobber
-          }
-          gh release view $tag --json url,name,assets
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "ChurchRadio Studio $tag" --notes-file .github/RELEASE_NOTES.md --target "$GITHUB_SHA"
+          fi
+          for a in dist/ChurchRadio-Studio-Setup.exe dist/ChurchRadio-Studio-macOS.dmg \
+                   dist/ChurchRadio-Studio-Linux-x86_64.tar.gz dist/SHA256SUMS.txt; do
+            gh release upload "$tag" "$a" --clobber
+          done
+          gh release view "$tag" --json url,name,assets

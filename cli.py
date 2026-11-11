@@ -1,7 +1,9 @@
-"""Make the broadcast with no window, for Windows Task Scheduler (or a script).
+"""Make the broadcast with no window, for Windows Task Scheduler, cron or launchd (or a script).
 
     ChurchRadio-Studio.exe --build "C:\\OBS Recordings"
     ChurchRadio-Studio.exe --build "C:\\OBS Recordings\\service 11.15.2026.mkv" --date 2026-11-15
+    "/Applications/ChurchRadio Studio.app/Contents/MacOS/ChurchRadio-Studio" --build ~/Movies
+    ~/.local/bin/churchradio-studio --build ~/Videos
 
 --build takes a recording, or a folder: then the newest recording in it is used, unless its
 broadcast MP3 is already there (nothing to do) or it is still being written (try again later).
@@ -49,7 +51,7 @@ class Parser(argparse.ArgumentParser):
 
 def parser():
     p = Parser(
-        prog="ChurchRadio-Studio.exe", description="Make the radio broadcast with no window.",
+        prog="ChurchRadio-Studio.exe" if sys.platform == "win32" else "ChurchRadio-Studio", description="Make the radio broadcast with no window.",
         epilog="Exit codes: 0 done or nothing to do, 1 failed, 2 done but too long (edit it by hand).")
     p.add_argument("--build", required=True, metavar="RECORDING_OR_FOLDER",
                    help="the service recording, or a folder: the newest recording in it")

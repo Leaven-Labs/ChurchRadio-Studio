@@ -2,9 +2,12 @@
 
 - program_dir(): the installed program (read-only under Program Files).
 - bundled_dir(): files shipped with the program (default config.json, hymns.csv, the icon).
+- resources_dir(): the program's other files, ffmpeg and the licenses: the program folder, or
+  Contents/Resources in the Mac app.
 - data_dir(): the user's files -- config.json, songs.csv, history.json, end_words.txt, and an
-  optional hymns.csv. On Windows %APPDATA%\\ChurchRadio Studio, elsewhere
-  ~/.config/churchradio-studio. CHURCHRADIO_DATA_DIR overrides it (for tests, or to keep
+  optional hymns.csv. On Windows %APPDATA%\\ChurchRadio Studio, on a Mac
+  ~/Library/Application Support/ChurchRadio Studio, on Linux ~/.config/churchradio-studio
+  ($XDG_CONFIG_HOME if set). CHURCHRADIO_DATA_DIR overrides it (for tests, or to keep
   everything in one portable folder).
 The speech models live in their own per-PC folder (see prelude.fixed_models_dir).
 """
@@ -29,6 +32,19 @@ def bundled_dir():
     return program_dir()
 
 
+def mac_app():
+    """True when running as the Mac app (ChurchRadio Studio.app/Contents/MacOS/...)."""
+    return sys.platform == "darwin" and getattr(sys, "frozen", False) \
+        and os.path.basename(program_dir()) == "MacOS"
+
+
+def resources_dir():
+    """Where ffmpeg and the licenses are: Contents/Resources in the Mac app, else the program folder."""
+    if mac_app():
+        return os.path.join(os.path.dirname(program_dir()), "Resources")
+    return program_dir()
+
+
 def version():
     """The version of this build (written by the release workflow), or "development"."""
     try:
@@ -46,11 +62,13 @@ def asset(name):
 def _user_root():
     if sys.platform == "win32":
         return os.environ.get("APPDATA") or os.path.expanduser("~")
-    return os.path.join(os.path.expanduser("~"), ".config")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    return (os.environ.get("XDG_CONFIG_HOME") or "").strip() or os.path.join(os.path.expanduser("~"), ".config")
 
 
 def _folder(root, name, slug):
-    return os.path.join(root, name if sys.platform == "win32" else slug)
+    return os.path.join(root, name if sys.platform in ("win32", "darwin") else slug)
 
 
 def data_dir():

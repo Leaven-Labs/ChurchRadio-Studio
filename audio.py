@@ -11,16 +11,31 @@ NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 _tools = {}
 
 
+# Where ffmpeg is usually installed by hand, tried after PATH. A Mac app started from the Dock
+# does not get the Terminal's PATH, so Homebrew's folders are listed here too.
+OTHER_PLACES = {"win32": [r"C:\ffmpeg\bin"], "darwin": ["/opt/homebrew/bin", "/usr/local/bin"],
+                "linux": ["/usr/bin", "/usr/local/bin"]}
+INSTALL_HINT = {"win32": "Install a full ffmpeg build in C:\\ffmpeg\\bin.",
+                "darwin": "Install ffmpeg with Homebrew: brew install ffmpeg",
+                "linux": "Install ffmpeg with your package manager, e.g. sudo apt install ffmpeg"}
+
+
+def _platform():
+    return "win32" if sys.platform == "win32" else "darwin" if sys.platform == "darwin" else "linux"
+
+
 def find_tool(name):
     """Find a working ffmpeg/ffprobe: the one installed with the app (ffmpeg folder), the app
-    folder, PATH, then C:\\ffmpeg\\bin. Checked once, then remembered."""
+    folder, PATH, then the usual places for this system (OTHER_PLACES). Checked once, then
+    remembered."""
     if name in _tools:
         return _tools[name]
-    from paths import program_dir
-    here = program_dir()
+    from paths import program_dir, resources_dir
+    here, res = program_dir(), resources_dir()
     exe = name + (".exe" if sys.platform == "win32" else "")
-    for cand in (os.path.join(here, "ffmpeg", exe), os.path.join(here, exe), shutil.which(name),
-                 os.path.join(r"C:\ffmpeg\bin", exe)):
+    cands = [os.path.join(res, "ffmpeg", exe), os.path.join(here, "ffmpeg", exe), os.path.join(here, exe),
+             shutil.which(name)] + [os.path.join(p, exe) for p in OTHER_PLACES[_platform()]]
+    for cand in dict.fromkeys(c for c in cands if c):
         if cand and os.path.exists(cand):
             try:
                 subprocess.run([cand, "-version"], capture_output=True, timeout=20,
@@ -29,7 +44,7 @@ def find_tool(name):
                 return cand
             except Exception:  # noqa: BLE001  broken copy, try the next one
                 continue
-    raise RuntimeError(f"{name} not found. Install a full ffmpeg build in C:\\ffmpeg\\bin.")
+    raise RuntimeError(f"{name} not found. {INSTALL_HINT[_platform()]}")
 
 
 def _run(args):

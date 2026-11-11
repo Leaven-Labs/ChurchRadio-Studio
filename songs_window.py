@@ -8,22 +8,30 @@ import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import messagebox, ttk
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLineEdit, QMessageBox, QPushButton,
+                               QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 import audio
 import catalog
 import churchyear
 import pdlookup
+import ui
 
 SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epiphany", "lent": "Lent",
                  "holyweek": "Holy Week", "easter": "Easter", "pentecost": "Pentecost",
                  churchyear.PATRIOTIC: "Patriotic"}
 SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Allowed to broadcast", "Needs permission",
         "Not looked up")
-COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 280, "w"), ("seasons", "Seasons", 150, "w"),
-           ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("pd", "Public domain", 105, "center"),
-           ("file", "File", 200, "w"))
+COLUMNS = (("On", 52), ("Title", 300), ("Seasons", 160), ("Length", 70), ("Words", 64), ("Public domain", 130),
+           ("File", 220))
+ON, TITLE, SEASONS, LENGTH, WORDS, PD, FILE = range(7)
+KEY = Qt.UserRole + 1  # on the Title item: the song's key in the song list (its file path)
+PD_KIND = {"yes": "ok", "allowed": "ok", "check": "warn", "no": "no"}  # the colour of the label
+FILES_CSV = "CSV files (*.csv);;All files (*)"
 PD_ABOUT = ("The app looks up each song's title on Wikidata (free, open data) and says whether the song "
             "(its words and tune) is in the public domain in the US: published before {first}.\n\n"
             "Yes = public domain. Allowed = under copyright, but released under a license that lets anyone "
@@ -76,6 +84,14 @@ def matches(row, show, find, min_words=catalog.MIN_WORDS):
     return not find or find in title_of(row).lower() or find in os.path.basename(row["file"]).lower()
 
 
+def pd_kind(row):
+    """The colour of the Public domain label: "ok", "warn", "no" or "" (see ui.PillDelegate)."""
+    pd = (row.get("public_domain") or "").strip().lower()
+    if (row.get("permission") or "").strip() and pd != "yes":
+        pd = "allowed"
+    return PD_KIND.get(pd, "")
+
+
 def play(path):
     """Open the song in the PC's music player."""
     if sys.platform == "win32":
@@ -84,229 +100,295 @@ def play(path):
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path])
 
 
+def buttons_row(*buttons):
+    """A row of buttons at the bottom of a box, pushed to the right."""
+    row = QHBoxLayout()
+    row.addStretch()
+    for b in buttons:
+        row.addWidget(b)
+    return row
+
+
 def ask_seasons(parent, name, current, on_ok):
     """A small box to tick the seasons a song may play in. on_ok(list of season tags) is called
     on OK (an empty list = General, any time of the year)."""
     current = set(current)
-    dlg = tk.Toplevel(parent)
-    dlg.title("Seasons")
-    dlg.transient(parent)
-    dlg.resizable(False, False)
-    ttk.Label(dlg, text=f"When may {name} play?", wraplength=320).pack(anchor="w", padx=12, pady=(12, 6))
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Seasons")
+    lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(18, 16, 18, 16)
+    lay.addWidget(ui.label(f"When may {name} play?", "strong", wrap=True))
     tick = {}
-    for tag, label in SEASON_LABELS.items():
-        tick[tag] = tk.BooleanVar(value=tag in current)
-        ttk.Checkbutton(dlg, text=label + (" (only on the holiday weekend)" if tag == churchyear.PATRIOTIC else ""),
-                        variable=tick[tag]).pack(anchor="w", padx=20)
-    ttk.Label(dlg, text="None ticked = General: may play any time of the year.",
-              foreground="#555555").pack(anchor="w", padx=12, pady=(6, 0))
-    btns = ttk.Frame(dlg)
-    btns.pack(fill="x", padx=12, pady=12)
-
-    def ok():
-        tags = [t for t in SEASON_LABELS if tick[t].get()]
-        dlg.destroy()
-        on_ok(tags)
-
-    ttk.Button(btns, text="OK", command=ok).pack(side="right")
-    ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(side="right", padx=6)
-    dlg.bind("<Return>", lambda e: ok())
-    dlg.bind("<Escape>", lambda e: dlg.destroy())
-    dlg.update_idletasks()  # open it over the middle of the window it belongs to
-    dlg.geometry(f"+{parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_width()) // 2}"
-                 f"+{parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_height()) // 3}")
-    dlg.grab_set()
-    return dlg
+    for tag, text in SEASON_LABELS.items():
+        tick[tag] = QCheckBox(text + (" (only on the holiday weekend)" if tag == churchyear.PATRIOTIC else ""))
+        tick[tag].setChecked(tag in current)
+        lay.addWidget(tick[tag])
+    lay.addWidget(ui.label("None ticked = General: may play any time of the year.", "hint"))
+    ok, cancel = QPushButton("OK"), QPushButton("Cancel")
+    ok.setObjectName("primary")
+    ok.setDefault(True)
+    ok.clicked.connect(dlg.accept)
+    cancel.clicked.connect(dlg.reject)
+    lay.addSpacing(6)
+    lay.addLayout(buttons_row(cancel, ok))
+    if dlg.exec() == QDialog.Accepted:
+        on_ok([t for t in SEASON_LABELS if tick[t].isChecked()])
 
 
 def ask_identify(parent, rows, selected, on_ok):
     """Which songs to identify: the selected ones, the ones with no title, or all of them (a bulk
     scan). Calls on_ok(keys, keep titles and seasons already set, also check public domain)."""
     untitled = [k for k, r in rows.items() if not (r.get("title") or "").strip()]
-    groups = [("selected", f"The selected songs ({len(selected)})", list(selected)),
-              ("untitled", f"Songs with no title ({len(untitled)})", untitled),
-              ("all", f"All songs ({len(rows)}): a bulk scan", list(rows))]
-    groups = [g for g in groups if g[2]]
+    groups = [(f"The selected songs ({len(selected)})", list(selected)),
+              (f"Songs with no title ({len(untitled)})", untitled),
+              (f"All songs ({len(rows)}): a bulk scan", list(rows))]
+    groups = [g for g in groups if g[1]]
     if not groups:
-        messagebox.showinfo("Identify", "There are no songs in the list yet.", parent=parent)
-        return None
-    dlg = tk.Toplevel(parent)
-    dlg.title("Identify songs")
-    dlg.transient(parent)
-    dlg.resizable(False, False)
-    ttk.Label(dlg, text="The app listens to the start of each song and suggests its title and seasons. "
-                        "You check the suggestions before anything is saved.",
-              wraplength=380, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
-    which = tk.StringVar(value=groups[0][0])
-    for key, label, _keys in groups:
-        ttk.Radiobutton(dlg, text=label, value=key, variable=which).pack(anchor="w", padx=20)
-    keep = tk.BooleanVar(value=True)
-    check_pd = tk.BooleanVar(value=True)
-    ttk.Checkbutton(dlg, text="Keep the titles and seasons songs already have\n(only songs with no title "
-                              "get a suggestion)", variable=keep).pack(anchor="w", padx=12, pady=(10, 0))
-    ttk.Checkbutton(dlg, text="Also check whether each song is in the public domain\n(needs the internet)",
-                    variable=check_pd).pack(anchor="w", padx=12, pady=(4, 0))
-    ttk.Label(dlg, text="Listening takes a few seconds per song: a bulk scan of many songs can take a "
-                        "while. Cancel in the next window keeps nothing.", foreground="#555555",
-              wraplength=380, justify="left").pack(anchor="w", padx=12, pady=(8, 0))
-    btns = ttk.Frame(dlg)
-    btns.pack(fill="x", padx=12, pady=12)
-
-    def ok():
-        keys = next(g[2] for g in groups if g[0] == which.get())
-        k, pd = keep.get(), check_pd.get()
-        dlg.destroy()
-        on_ok(keys, k, pd)
-
-    def cancel():
-        dlg.destroy()
-        parent.grab_set()  # keep the main window blocked while Songs is open
-
-    ttk.Button(btns, text="Start", command=ok).pack(side="right")
-    ttk.Button(btns, text="Cancel", command=cancel).pack(side="right", padx=6)
-    dlg.bind("<Return>", lambda e: ok())
-    dlg.bind("<Escape>", lambda e: cancel())
-    dlg.protocol("WM_DELETE_WINDOW", cancel)
-    dlg.update_idletasks()
-    dlg.geometry(f"+{parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_width()) // 2}"
-                 f"+{parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_height()) // 3}")
-    dlg.grab_set()
-    return dlg
+        QMessageBox.information(parent, "Identify", "There are no songs in the list yet.")
+        return
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Identify songs")
+    lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(18, 16, 18, 16)
+    intro = ui.label("The app listens to the start of each song and suggests its title and seasons. "
+                     "You check the suggestions before anything is saved.", wrap=True)
+    intro.setMinimumWidth(400)
+    lay.addWidget(intro)
+    which = QButtonGroup(dlg)
+    for i, (text, _keys) in enumerate(groups):
+        radio = QRadioButton(text)
+        radio.setChecked(i == 0)
+        which.addButton(radio, i)
+        lay.addWidget(radio)
+    lay.addSpacing(6)
+    keep = QCheckBox("Keep the titles and seasons songs already have\n(only songs with no title get a suggestion)")
+    keep.setChecked(True)
+    check_pd = QCheckBox("Also check whether each song is in the public domain\n(needs the internet)")
+    check_pd.setChecked(True)
+    lay.addWidget(keep)
+    lay.addWidget(check_pd)
+    lay.addWidget(ui.label("Listening takes a few seconds per song: a bulk scan of many songs can take a "
+                           "while. Cancel in the next window keeps nothing.", "hint", wrap=True))
+    start, cancel = QPushButton("Start"), QPushButton("Cancel")
+    start.setObjectName("primary")
+    start.setDefault(True)
+    start.clicked.connect(dlg.accept)
+    cancel.clicked.connect(dlg.reject)
+    lay.addSpacing(6)
+    lay.addLayout(buttons_row(cancel, start))
+    if dlg.exec() == QDialog.Accepted:
+        on_ok(groups[which.checkedId()][1], keep.isChecked(), check_pd.isChecked())
 
 
-class SongsWindow:
+class SongsWindow(QDialog):
+    """The Songs window. Open it with exec(): no broadcast is made while songs are edited."""
+
     def __init__(self, parent, csv_path, folders, min_words=catalog.MIN_WORDS, get_edges=None,
                  models_folder="", on_folders=None):
+        super().__init__(parent)
         self.path, self.folders, self.min_words, self.get_edges = csv_path, folders, min_words, get_edges
         self.models_folder, self.on_folders = models_folder, on_folders
         self.rows = catalog.load(csv_path)
-        self.win = w = tk.Toplevel(parent)
-        w.title("Songs")
-        w.geometry("1100x580")
-        w.transient(parent)
-        w.grab_set()  # no build while songs are edited
+        self.row_of, self.counts, self.filling, self.closed, self.pd_running = {}, "", False, False, False
+        self.setWindowTitle("Songs")
+        self.resize(1120, 640)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(10)
 
-        top = ttk.Frame(w)
-        top.pack(fill="x", padx=10, pady=(10, 4))
-        ttk.Label(top, text="Find:").pack(side="left")
-        self.find = tk.StringVar()
-        self.find.trace_add("write", lambda *_: self.fill())
-        ttk.Entry(top, textvariable=self.find, width=24).pack(side="left", padx=(4, 12))
-        ttk.Label(top, text="Show:").pack(side="left")
-        self.show = tk.StringVar(value=SHOW[0])
-        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=20, textvariable=self.show)
-        cb.pack(side="left", padx=4)
-        cb.bind("<<ComboboxSelected>>", lambda e: self.fill())
-        self.find_btn = ttk.Button(top, text="Look for new songs", command=self.rescan)
-        self.find_btn.pack(side="right")
-        ttk.Button(top, text="Add songs...", command=self.add_songs).pack(side="right", padx=6)
-        self.import_btn = ttk.Button(top, text="Import list...", command=self.import_list)
-        self.import_btn.pack(side="right")
+        top = QHBoxLayout()
+        top.addWidget(ui.label("Songs", "title"))
+        self.status = ui.label("", "sub")
+        top.addWidget(self.status)
+        top.addStretch()
+        self.import_btn = QPushButton("Import list...")
+        self.import_btn.clicked.connect(self.import_list)
+        self.find_btn = QPushButton("Look for new songs")
+        self.find_btn.clicked.connect(self.rescan)
+        add = QPushButton("Add songs...")
+        add.setObjectName("primary")
+        add.clicked.connect(self.add_songs)
+        for b in (self.import_btn, self.find_btn, add):
+            b.setAutoDefault(False)
+            top.addWidget(b)
+        lay.addLayout(top)
 
-        hint = ttk.Frame(w)
-        hint.pack(fill="x", padx=10)
-        ttk.Label(hint, text="Click On to turn a song on or off. Double-click a title to rename it, "
-                             "or Seasons to choose when it plays.").pack(side="left")
-        # The counts and progress, on this line: on the button row a long one pushed buttons off.
-        self.status = ttk.Label(hint, text="")
-        self.status.pack(side="right")
-        body = ttk.Frame(w)
-        body.pack(fill="both", expand=True, padx=10, pady=4)
-        self.tree = ttk.Treeview(body, columns=[c[0] for c in COLUMNS], show="headings", selectmode="extended")
-        for key, text, width, anchor in COLUMNS:
-            self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor=anchor, stretch=key in ("title", "file"))
-        self.tree.tag_configure("off", foreground="#888888")
-        sb = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.tree.bind("<Button-1>", self.click)
-        self.tree.bind("<Double-1>", self.double_click)
-        self.tree.bind("<space>", lambda e: self.set_on(None))
-        self.tree.bind("<Return>", lambda e: self.play_selected())
-        self.tree.bind("<<TreeviewSelect>>", lambda e: self.show_note())
-        self.note = ttk.Label(w, foreground="#555555", wraplength=1070, justify="left")
-        self.note.pack(fill="x", padx=10)
+        row = QHBoxLayout()
+        self.find = QLineEdit()
+        self.find.setPlaceholderText("Find a song")
+        self.find.setClearButtonEnabled(True)
+        self.find.setFixedWidth(280)
+        self.find.textChanged.connect(lambda _t: self.fill())
+        row.addWidget(self.find)
+        self.show_box = QComboBox()
+        self.show_box.addItems(SHOW)
+        self.show_box.setMinimumWidth(200)
+        self.show_box.currentIndexChanged.connect(lambda _i: self.fill())
+        row.addWidget(self.show_box)
+        row.addSpacing(8)
+        row.addWidget(ui.label("Tick On to turn a song on or off. Double-click a title to rename it, "
+                               "or Seasons to choose when it plays.", "hint"))
+        row.addStretch()
+        lay.addLayout(row)
 
-        bottom = ttk.Frame(w)
-        bottom.pack(fill="x", padx=10, pady=(4, 10))
-        ttk.Button(bottom, text="Play", command=self.play_selected).pack(side="left")
-        ttk.Button(bottom, text="Turn on", command=lambda: self.set_on(True)).pack(side="left", padx=(12, 0))
-        ttk.Button(bottom, text="Turn off", command=lambda: self.set_on(False)).pack(side="left", padx=4)
-        ttk.Button(bottom, text="Rename...", command=self.rename_selected).pack(side="left", padx=(12, 0))
-        ttk.Button(bottom, text="Seasons...", command=self.seasons_selected).pack(side="left", padx=4)
-        ttk.Button(bottom, text="Identify...", command=self.identify_selected).pack(side="left", padx=(12, 0))
-        self.pd_btn = ttk.Button(bottom, text="Check public domain...", command=self.public_domain)
-        self.pd_btn.pack(side="left", padx=4)
-        ttk.Button(bottom, text="Permission...", command=self.permission_selected).pack(side="left")
-        ttk.Button(bottom, text="Close", command=w.destroy).pack(side="right")
-        self.pd_running = False
-        w.bind("<Destroy>", lambda e: e.widget is w and setattr(self, "pd_running", False))
+        self.table = t = QTableWidget(0, len(COLUMNS))
+        t.setHorizontalHeaderLabels([c[0] for c in COLUMNS])
+        t.verticalHeader().hide()
+        t.verticalHeader().setDefaultSectionSize(34)
+        t.setShowGrid(False)
+        t.setSelectionBehavior(QAbstractItemView.SelectRows)
+        t.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        t.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        t.setItemDelegateForColumn(PD, ui.PillDelegate(t))
+        head = t.horizontalHeader()
+        head.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        head.setHighlightSections(False)
+        for i, (_text, width) in enumerate(COLUMNS):
+            t.setColumnWidth(i, width)
+        head.setSectionResizeMode(TITLE, QHeaderView.Stretch)
+        head.setSectionResizeMode(ON, QHeaderView.Fixed)
+        t.itemChanged.connect(self.item_changed)
+        t.cellDoubleClicked.connect(self.double_click)
+        t.itemSelectionChanged.connect(self.show_note)
+        for key, slot in ((Qt.Key_Space, lambda: self.set_on(None)), (Qt.Key_Return, self.play_selected),
+                          (Qt.Key_Enter, self.play_selected)):
+            QShortcut(QKeySequence(key), t, slot, context=Qt.WidgetShortcut)
+        lay.addWidget(t, 1)
+
+        self.note = ui.label("", "sub", wrap=True)
+        lay.addWidget(self.note)
+
+        bottom = QHBoxLayout()
+        self.pd_btn = QPushButton("Check public domain...")
+        for text, slot, gap in (("Play", self.play_selected, 0), ("Turn on", lambda: self.set_on(True), 10),
+                                ("Turn off", lambda: self.set_on(False), 0),
+                                ("Rename...", self.rename_selected, 10), ("Seasons...", self.seasons_selected, 0),
+                                ("Identify...", self.identify_selected, 10), (self.pd_btn, self.public_domain, 0),
+                                ("Permission...", self.permission_selected, 0)):
+            b = text if isinstance(text, QPushButton) else QPushButton(text)
+            b.setAutoDefault(False)
+            b.clicked.connect(slot)
+            bottom.addSpacing(gap)
+            bottom.addWidget(b)
+        bottom.addStretch()
+        close = QPushButton("Close")
+        close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        bottom.addWidget(close)
+        lay.addLayout(bottom)
 
         self.fill()
         if not self.rows:
             self.rescan()
 
+    def done(self, result):
+        self.closed = True  # the background work and its timers stop
+        self.pd_running = False
+        super().done(result)
+
     # ---- list ---------------------------------------------------------------------------
     def fill(self):
-        sel = set(self.tree.selection())
-        self.tree.delete(*self.tree.get_children())
-        shown = 0
-        for key in sorted(self.rows, key=lambda k: title_of(self.rows[k]).lower()):
-            r = self.rows[key]
-            if not matches(r, self.show.get(), self.find.get(), self.min_words):
-                continue
-            self.tree.insert("", "end", iid=key, values=self.values(r), tags=() if catalog.is_on(r) else ("off",))
-            shown += 1
-        keep = [k for k in sel if self.tree.exists(k)]
-        if keep:
-            self.tree.selection_set(keep)
+        t = self.table
+        sel, scroll = set(self.selected()), t.verticalScrollBar().value()
+        self.filling = True
+        t.setRowCount(0)
+        self.row_of = {}
+        shown = [k for k in sorted(self.rows, key=lambda k: title_of(self.rows[k]).lower())
+                 if matches(self.rows[k], self.show_box.currentText(), self.find.text(), self.min_words)]
+        t.setRowCount(len(shown))
+        for i, key in enumerate(shown):
+            self.row_of[key] = i
+            for col in range(len(COLUMNS)):
+                t.setItem(i, col, QTableWidgetItem())
+            self.put(i, key)
+        t.clearSelection()
+        mode = t.selectionMode()
+        t.setSelectionMode(QAbstractItemView.MultiSelection)  # so every kept row is selected again
+        for key in sel:
+            if key in self.row_of:
+                t.selectRow(self.row_of[key])
+        t.setSelectionMode(mode)
+        t.verticalScrollBar().setValue(scroll)
+        self.filling = False
         on = sum(catalog.is_on(r) for r in self.rows.values())
         self.counts = f"{len(self.rows)} songs, {on} on"
-        self.status.config(text=self.counts if shown == len(self.rows) else f"{shown} shown. {self.counts}")
+        self.status.setText(self.counts if len(shown) == len(self.rows) else f"{len(shown)} shown. {self.counts}")
+        self.show_note()
 
-    def values(self, r):
+    def put(self, i, key):
+        """Write one song into table row i."""
+        r, t = self.rows[key], self.table
+        on = catalog.is_on(r)
         w = (r.get("words") or "").strip()
-        pd = pd_label(r)
-        return ("✔" if catalog.is_on(r) else "", title_of(r), seasons_text(r),
-                audio.fmt(catalog._duration(r)), w if w else "-", pd, os.path.basename(r["file"]))
+        texts = ("", title_of(r), seasons_text(r), audio.fmt(catalog._duration(r)), w if w else "-", pd_label(r),
+                 os.path.basename(r["file"]))
+        for col, text in enumerate(texts):
+            item = t.item(i, col)
+            item.setText(text)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | (Qt.ItemIsUserCheckable if col == ON else
+                                                                    Qt.ItemIsEditable if col == TITLE else
+                                                                    Qt.NoItemFlags))
+            item.setForeground(QColor(ui.colors["text" if on else "off"]))
+            if col in (LENGTH, WORDS):
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        t.item(i, ON).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        t.item(i, TITLE).setData(KEY, key)
+        t.item(i, PD).setData(Qt.UserRole, pd_kind(r))
+        t.item(i, FILE).setToolTip(r["file"])
 
     def refresh(self, key):
-        r = self.rows[key]
-        if self.tree.exists(key):
-            self.tree.item(key, values=self.values(r), tags=() if catalog.is_on(r) else ("off",))
+        if key in self.row_of:
+            was, self.filling = self.filling, True
+            self.put(self.row_of[key], key)
+            self.filling = was
+
+    def later(self, call):
+        """Run call() when the table has finished what it is doing (it may not be refilled from
+        inside one of its own signals)."""
+        QTimer.singleShot(0, lambda: None if self.closed else call())
 
     def save(self):
         try:
             catalog.save(self.path, self.rows)
             return True
         except OSError as e:
-            messagebox.showerror("Songs", f"Could not save songs.csv:\n{e}\n\n"
-                                          "If songs.csv is open in Excel, close it and try again.", parent=self.win)
+            QMessageBox.critical(self, "Songs", f"Could not save songs.csv:\n{e}\n\n"
+                                 "If songs.csv is open in Excel, close it and try again.")
             return False
 
     # ---- actions ------------------------------------------------------------------------
+    def key_at(self, row):
+        item = self.table.item(row, TITLE)
+        return item.data(KEY) if item else None
+
     def selected(self):
-        return list(self.tree.selection())
+        model = self.table.selectionModel()
+        rows = sorted(i.row() for i in model.selectedRows()) if model else []
+        return [k for k in (self.key_at(r) for r in rows) if k in self.rows]
 
-    def click(self, e):
-        if self.tree.identify_region(e.x, e.y) == "cell" and self.tree.identify_column(e.x) == "#1":
-            key = self.tree.identify_row(e.y)
-            if key:
-                self.tree.selection_set([key])
-                self.set_on(None, [key])
-                return "break"
-        return None
-
-    def double_click(self, e):
-        key, col = self.tree.identify_row(e.y), self.tree.identify_column(e.x)
-        if not key or col == "#1":
+    def item_changed(self, item):
+        """The person ticked the On box, or typed a new title."""
+        if self.filling:
             return
-        self.tree.selection_set([key])
-        if col == "#3":
-            self.edit_seasons([key])
+        key = self.key_at(item.row())
+        if key not in self.rows:
+            return
+        if item.column() == ON:
+            self.rows[key]["enabled"] = "yes" if item.checkState() == Qt.Checked else "no"
+        elif item.column() == TITLE:
+            self.rows[key]["title"] = " ".join(item.text().split())
         else:
+            return
+        self.save()
+        self.later(self.fill)
+
+    def double_click(self, row, col):
+        key = self.key_at(row)
+        if not key:
+            return
+        if col == SEASONS:
+            self.edit_seasons([key])
+        elif col not in (ON, TITLE):  # a double-click on the title itself already edits it
             self.rename(key)
 
     def set_on(self, on, keys=None):
@@ -324,12 +406,12 @@ class SongsWindow:
             return
         path = self.rows[keys[0]]["file"]
         if not os.path.exists(path):
-            messagebox.showerror("Songs", f"File not found:\n{path}", parent=self.win)
+            QMessageBox.critical(self, "Songs", f"File not found:\n{path}")
             return
         try:
             play(path)
         except OSError as e:
-            messagebox.showerror("Songs", f"Could not play the song:\n{e}", parent=self.win)
+            QMessageBox.critical(self, "Songs", f"Could not play the song:\n{e}")
 
     def rename_selected(self):
         keys = self.selected()
@@ -337,30 +419,12 @@ class SongsWindow:
             self.rename(keys[0])
 
     def rename(self, key):
-        """Edit the title in place: an entry box over the Title cell. Enter saves, Esc cancels."""
-        self.tree.see(key)
-        x, y, w, h = self.tree.bbox(key, "#2")
-        ent = ttk.Entry(self.tree)
-        ent.insert(0, self.rows[key].get("title") or title_of(self.rows[key]))
-        ent.select_range(0, "end")
-        ent.place(x=x, y=y, width=w, height=h)
-        ent.focus_set()
-
-        def done(keep):
-            if not ent.winfo_exists() or getattr(ent, "done", False):
-                return
-            ent.done = True
-            if keep:
-                self.rows[key]["title"] = ent.get().strip()
-                if self.save():
-                    self.refresh(key)
-            ent.destroy()
-            self.tree.focus_set()
-
-        ent.bind("<Return>", lambda e: done(True))
-        ent.bind("<KP_Enter>", lambda e: done(True))
-        ent.bind("<Escape>", lambda e: done(False))
-        ent.bind("<FocusOut>", lambda e: done(True))
+        """Edit the title in place, in the Title cell. Enter saves, Esc cancels."""
+        if key in self.row_of:
+            item = self.table.item(self.row_of[key], TITLE)
+            self.table.scrollToItem(item)
+            self.table.setFocus()
+            self.table.editItem(item)
 
     def seasons_selected(self):
         keys = self.selected()
@@ -378,33 +442,31 @@ class SongsWindow:
             if self.save():
                 self.fill()
 
-        ask_seasons(self.win, name, current, ok)
+        ask_seasons(self, name, current, ok)
 
     def add_songs(self):
         """Pick song files, let the app identify them, confirm, and copy them into a song folder."""
         import add_songs
-        from tkinter import filedialog
-        files = filedialog.askopenfilenames(parent=self.win, title="Songs to add", filetypes=add_songs.AUDIO)
+        files, _filter = QFileDialog.getOpenFileNames(self, "Songs to add", "", add_songs.AUDIO)
         if files:
-            add_songs.SongReview(self.win, list(files), self.path, self.folders, mode="add",
+            add_songs.SongReview(self, [os.path.normpath(f) for f in files], self.path, self.folders, mode="add",
                                  min_words=self.min_words, models_folder=self.models_folder,
-                                 get_edges=self.get_edges, on_done=self.after_review, check_pd=True)
+                                 get_edges=self.get_edges, on_done=self.after_review, check_pd=True).exec()
 
     def identify_selected(self):
         """Suggest titles and seasons for songs: the selected ones, those without a title, or all of
         them (a bulk scan), and if asked, look up whether they are in the public domain as well."""
-        ask_identify(self.win, self.rows, self.selected(), self.run_identify)
+        ask_identify(self, self.rows, self.selected(), self.run_identify)
 
     def run_identify(self, keys, keep, check_pd):
         import add_songs
         keys = [k for k in keys if os.path.exists(self.rows[k]["file"])]
         if not keys:
-            messagebox.showinfo("Identify", "None of these song files could be found.", parent=self.win)
-            self.regrab()
+            QMessageBox.information(self, "Identify", "None of these song files could be found.")
             return
-        add_songs.SongReview(self.win, keys, self.path, self.folders, mode="identify",
+        add_songs.SongReview(self, keys, self.path, self.folders, mode="identify",
                              min_words=self.min_words, models_folder=self.models_folder,
-                             rows=self.rows, on_done=self.after_review, keep=keep, check_pd=check_pd)
+                             rows=self.rows, on_done=self.after_review, keep=keep, check_pd=check_pd).exec()
 
     def after_review(self, folders=None):
         if folders is not None and folders != self.folders:
@@ -413,64 +475,64 @@ class SongsWindow:
                 self.on_folders(folders)
         self.rows = catalog.load(self.path)
         self.fill()
-        self.win.grab_set()
 
     def import_list(self):
         """Explain the import file, offer the template, then import the file the person picks."""
-        dlg = tk.Toplevel(self.win)
-        dlg.title("Import song list")
-        dlg.transient(self.win)
-        dlg.resizable(False, False)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Import song list")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(18, 16, 18, 16)
         text = ("Add many songs at once, or change their titles, seasons and on/off, from a CSV file "
-                "(Excel: Save As \u2192 CSV).\n\n"
+                "(Excel: Save As → CSV).\n\n"
                 "Columns:\n"
-                "  file \u2014 the song's full path, or its file name if it is in one of your song folders\n"
-                "  title \u2014 the song name\n"
-                "  seasons \u2014 advent, christmas, epiphany, lent, holyweek, easter, pentecost or\n"
+                "  file — the song's full path, or its file name if it is in one of your song folders\n"
+                "  title — the song name\n"
+                "  seasons — advent, christmas, epiphany, lent, holyweek, easter, pentecost or\n"
                 "      patriotic, separated by ; (empty or general = any time of the year)\n"
-                "  enabled \u2014 yes or no\n\n"
+                "  enabled — yes or no\n\n"
                 "For a song already in your list, an empty cell keeps what is there now. "
                 "The song files are not copied: they stay where they are.")
-        ttk.Label(dlg, text=text, justify="left", wraplength=520).pack(anchor="w", padx=14, pady=(14, 10))
-        btns = ttk.Frame(dlg)
-        btns.pack(fill="x", padx=14, pady=(0, 14))
+        about = ui.label(text, wrap=True)
+        about.setMinimumWidth(540)
+        lay.addWidget(about)
+        picked = []
 
         def template():
-            from tkinter import filedialog
-            f = filedialog.asksaveasfilename(parent=dlg, title="Save the template", defaultextension=".csv",
-                                             initialfile="song import template.csv",
-                                             filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            f, _filter = QFileDialog.getSaveFileName(dlg, "Save the template", "song import template.csv", FILES_CSV)
             if not f:
                 return
             try:
                 catalog.write_template(f)
             except OSError as e:
-                messagebox.showerror("Import song list", f"Could not save the template:\n{e}", parent=dlg)
+                QMessageBox.critical(dlg, "Import song list", f"Could not save the template:\n{e}")
                 return
-            if messagebox.askyesno("Import song list", "Template saved. Replace the example rows with your "
-                                   "songs, save it, then click Import a file....\n\nOpen it now?", parent=dlg):
+            if ui.ask(dlg, "Import song list", "Template saved. Replace the example rows with your "
+                      "songs, save it, then click Import a file....\n\nOpen it now?"):
                 try:
                     play(f)  # opens it in Excel (or the PC's CSV program)
                 except OSError as e:
-                    messagebox.showerror("Import song list", str(e), parent=dlg)
+                    QMessageBox.critical(dlg, "Import song list", str(e))
 
         def pick():
-            from tkinter import filedialog
-            f = filedialog.askopenfilename(parent=dlg, title="Song list to import",
-                                           filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            f, _filter = QFileDialog.getOpenFileName(dlg, "Song list to import", "", FILES_CSV)
             if f:
-                dlg.destroy()
-                self.run_import(f)
+                picked.append(f)
+                dlg.accept()
 
-        ttk.Button(btns, text="Download template...", command=template).pack(side="left")
-        ttk.Button(btns, text="Close", command=dlg.destroy).pack(side="right")
-        ttk.Button(btns, text="Import a file...", command=pick).pack(side="right", padx=6)
-        dlg.bind("<Escape>", lambda e: dlg.destroy())
-        dlg.bind("<Destroy>", lambda e: e.widget is dlg and self.win.after_idle(self.regrab))
-        dlg.update_idletasks()
-        dlg.geometry(f"+{self.win.winfo_rootx() + (self.win.winfo_width() - dlg.winfo_width()) // 2}"
-                     f"+{self.win.winfo_rooty() + (self.win.winfo_height() - dlg.winfo_height()) // 3}")
-        dlg.grab_set()
+        tpl, imp, close = QPushButton("Download template..."), QPushButton("Import a file..."), QPushButton("Close")
+        imp.setObjectName("primary")
+        tpl.clicked.connect(template)
+        imp.clicked.connect(pick)
+        close.clicked.connect(dlg.reject)
+        row = QHBoxLayout()
+        row.addWidget(tpl)
+        row.addStretch()
+        row.addWidget(imp)
+        row.addWidget(close)
+        lay.addSpacing(8)
+        lay.addLayout(row)
+        if dlg.exec() == QDialog.Accepted and picked:
+            self.run_import(picked[0])
 
     def show_note(self):
         """Under the list: why the selected song is (or is not) in the public domain, and the
@@ -482,45 +544,44 @@ class SongsWindow:
         text = [f"Public domain: {note}"] if note else []
         if permission:
             text.append(f"Allowed to broadcast: {permission}")
-        self.note.config(text="\n".join(text))
+        self.note.setText("\n".join(text))
+        self.note.setVisible(bool(text))
 
     def permission_selected(self):
         """Type why the church may broadcast the selected songs (a license, a letter). Empty clears it."""
         keys = self.selected()
         if not keys:
-            messagebox.showinfo("Permission", "Select the songs you have permission to broadcast.", parent=self.win)
+            QMessageBox.information(self, "Permission", "Select the songs you have permission to broadcast.")
             return
-        from tkinter import simpledialog
         name = title_of(self.rows[keys[0]]) if len(keys) == 1 else f"these {len(keys)} songs"
-        text = simpledialog.askstring(
-            "Permission", f"Why may you broadcast {name}?\n\nFor example: CCLI Streaming License 123456, "
+        text, ok = QInputDialog.getText(
+            self, "Permission", f"Why may you broadcast {name}?\n\nFor example: CCLI Streaming License 123456, "
             "your station's radio license, or \"email from the writer, 3 May 2026\".\n"
             "The song is then shown as Allowed. Leave it empty to take the permission off.",
-            initialvalue=(self.rows[keys[0]].get("permission") or ""), parent=self.win)
-        self.regrab()
-        if text is None:
+            QLineEdit.Normal, self.rows[keys[0]].get("permission") or "")
+        if not ok:
             return
         for k in keys:
             self.rows[k]["permission"] = " ".join(text.split())
         if self.save():
             self.fill()
-            self.show_note()
 
     def public_domain(self):
         """Look up whether the selected songs (or every song not looked up yet) are in the public domain."""
         if self.pd_running:  # the button says Stop while it runs
             self.pd_running = False
-            self.pd_btn.config(text="Stopping ...")
-            self.pd_btn.state(["disabled"])
+            self.pd_btn.setText("Stopping ...")
+            self.pd_btn.setEnabled(False)
             return
         keys = self.selected() or [k for k, r in self.rows.items() if not (r.get("public_domain") or "").strip()]
         if not keys:
-            messagebox.showinfo("Public domain", "Every song has been looked up. Select songs to look them up "
-                                "again.", parent=self.win)
+            QMessageBox.information(self, "Public domain", "Every song has been looked up. Select songs to look "
+                                    "them up again.")
             return
         about = PD_ABOUT.format(first=pdlookup.cutoff_year() + 1)
-        if not messagebox.askokcancel("Public domain", f"Look up {len(keys)} song(s)? This needs the internet "
-                                      f"and takes a second or two per song.\n\n{about}", parent=self.win):
+        if QMessageBox.question(self, "Public domain", f"Look up {len(keys)} song(s)? This needs the internet "
+                                f"and takes a second or two per song.\n\n{about}",
+                                QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok) != QMessageBox.Ok:
             return
         hymns = []
         try:
@@ -530,8 +591,9 @@ class SongsWindow:
         except (OSError, ValueError):
             pass
         self.pd_running = True
-        self.pd_btn.config(text="Stop")
+        self.pd_btn.setText("Stop")
         q = queue.Queue()
+        titles = {k: title_of(self.rows[k]) for k in keys}
 
         def work():
             for i, k in enumerate(keys):
@@ -539,7 +601,7 @@ class SongsWindow:
                     break
                 q.put(("progress", i))
                 try:
-                    q.put(("done", k, pdlookup.lookup(title_of(self.rows[k]), hymns)))
+                    q.put(("done", k, pdlookup.lookup(titles[k], hymns)))
                 except pdlookup.LookupError_ as e:
                     q.put(("error", str(e)))
                     return
@@ -547,12 +609,12 @@ class SongsWindow:
             q.put(("finished",))
 
         def poll():
-            if not self.win.winfo_exists():
+            if self.closed:
                 return
             while not q.empty():
                 msg = q.get()
                 if msg[0] == "progress":
-                    self.status.config(text=f"Looking up song {msg[1] + 1} of {len(keys)} ...")
+                    self.status.setText(f"Looking up song {msg[1] + 1} of {len(keys)} ...")
                 elif msg[0] == "done":
                     k, r = msg[1], msg[2]
                     if k in self.rows:
@@ -562,93 +624,82 @@ class SongsWindow:
                         self.show_note()
                 else:
                     self.pd_running = False
-                    self.pd_btn.config(text="Check public domain...")
-                    self.pd_btn.state(["!disabled"])
+                    self.pd_btn.setText("Check public domain...")
+                    self.pd_btn.setEnabled(True)
                     self.fill()
                     if msg[0] == "error":
-                        messagebox.showerror("Public domain", msg[1], parent=self.win)
+                        QMessageBox.critical(self, "Public domain", msg[1])
                     return
-            self.win.after(150, poll)
+            QTimer.singleShot(150, poll)
 
         threading.Thread(target=work, daemon=True).start()
         poll()
 
-    def regrab(self):
-        """Keep the main window blocked while Songs is open (a box closing frees it)."""
-        if self.win.winfo_exists():
-            self.win.grab_set()
+    def in_background(self, work, then):
+        """Run work() in a thread, then call then(result or None, error text or None) in the window."""
+        result = {}
+
+        def run():
+            try:
+                result["out"] = work()
+            except Exception as e:  # noqa: BLE001  told to the person by then()
+                result["error"] = str(e)
+
+        def wait():
+            if self.closed:
+                return
+            if t.is_alive():
+                QTimer.singleShot(200, wait)
+                return
+            then(result.get("out"), result.get("error"))
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        wait()
 
     def run_import(self, import_path):
         """Import in the background (new songs are measured, which can take a minute)."""
-        self.import_btn.state(["disabled"])
-        self.status.config(text="Importing the song list ...")
-        result = {}
+        self.import_btn.setEnabled(False)
+        self.status.setText("Importing the song list ...")
 
-        def work():
-            try:
-                result["out"] = catalog.import_csv(self.path, import_path, self.folders, audio.duration,
-                                                   get_edges=self.get_edges, log=lambda m: None)
-            except (OSError, ValueError, KeyError) as e:
-                result["error"] = str(e)
-
-        def wait():
-            if not self.win.winfo_exists():
+        def then(out, error):
+            self.import_btn.setEnabled(True)
+            if error is not None:
+                self.status.setText(self.counts)
+                QMessageBox.critical(self, "Import song list", f"Could not import the song list:\n{error}\n\n"
+                                     "If songs.csv is open in Excel, close it and try again.")
                 return
-            if t.is_alive():
-                self.win.after(200, wait)
-                return
-            self.win.grab_set()
-            self.import_btn.state(["!disabled"])
-            if "error" in result:
-                self.status.config(text=self.counts)
-                messagebox.showerror("Import song list", f"Could not import the song list:\n{result['error']}\n\n"
-                                     "If songs.csv is open in Excel, close it and try again.", parent=self.win)
-                return
-            self.rows, added, updated, problems = result["out"]
+            self.rows, added, updated, problems = out
             self.fill()
             msg = f"{added} song(s) added, {updated} updated."
-            self.status.config(text=f"{msg} {self.counts}")
+            self.status.setText(f"{msg} {self.counts}")
             if problems:
                 more = f"\n... and {len(problems) - 15} more." if len(problems) > 15 else ""
-                messagebox.showwarning("Import song list", f"{msg}\n\nThese lines were skipped:\n"
-                                       + "\n".join(problems[:15]) + more, parent=self.win)
+                QMessageBox.warning(self, "Import song list", f"{msg}\n\nThese lines were skipped:\n"
+                                    + "\n".join(problems[:15]) + more)
             else:
-                messagebox.showinfo("Import song list", msg, parent=self.win)
+                QMessageBox.information(self, "Import song list", msg)
 
-        t = threading.Thread(target=work, daemon=True)
-        t.start()
-        wait()
+        self.in_background(lambda: catalog.import_csv(self.path, import_path, self.folders, audio.duration,
+                                                      get_edges=self.get_edges, log=lambda m: None), then)
 
     def rescan(self):
         """Look in the song folders for new songs (reads their lengths; can take a minute)."""
-        self.find_btn.state(["disabled"])
-        self.status.config(text="Looking for new songs ...")
-        result = {}
+        self.find_btn.setEnabled(False)
+        self.status.setText("Looking for new songs ...")
 
-        def work():
-            try:
-                result["rows"] = catalog.update(self.path, self.folders, audio.duration, log=lambda m: None,
-                                                get_edges=self.get_edges)
-            except Exception as e:  # noqa: BLE001
-                result["error"] = str(e)
-
-        def wait():
-            if not self.win.winfo_exists():
-                return
-            if t.is_alive():
-                self.win.after(200, wait)
-                return
-            self.find_btn.state(["!disabled"])
-            if "error" in result:
-                messagebox.showerror("Songs", f"Could not read the song folders:\n{result['error']}", parent=self.win)
+        def then(rows, error):
+            self.find_btn.setEnabled(True)
+            if error is not None:
+                QMessageBox.critical(self, "Songs", f"Could not read the song folders:\n{error}")
                 self.fill()
                 return
             before = set(self.rows)
-            self.rows = result["rows"]
+            self.rows = rows
             self.fill()
             new = len(set(self.rows) - before)
-            self.status.config(text=f"{new} new song(s) found. {self.counts}" if before else self.counts)
+            if before:
+                self.status.setText(f"{new} new song(s) found. {self.counts}")
 
-        t = threading.Thread(target=work, daemon=True)
-        t.start()
-        wait()
+        self.in_background(lambda: catalog.update(self.path, self.folders, audio.duration, log=lambda m: None,
+                                                  get_edges=self.get_edges), then)

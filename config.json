@@ -4,6 +4,7 @@
   "intro": "",
   "song_folders": [],
   "output_folder": "",
+  "theme": "auto",
   "target_minutes": 60,
   "tolerance_seconds": 30,
   "max_silence_seconds": 5,

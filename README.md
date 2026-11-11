@@ -257,7 +257,7 @@ end of each song, and at the end of the service, is removed, so there are no gap
 **Songs...** lists every song with its title, seasons, length and how many words were heard in it.
 Every change is saved at once.
 
-- **On / off** — click the tick in the **On** column, or select several and click **Turn on** /
+- **On / off** — click the tick box in the **On** column, or select several and click **Turn on** /
   **Turn off**. Songs that are off are never used.
 - **Rename** — double-click the title.
 - **Seasons** — double-click the seasons and tick when the song may play. None = **General** (any
@@ -385,6 +385,7 @@ Most settings are in **Settings...**. All of them are in `config.json` in your
 | `intro` | (none) | The intro file. Empty = no intro. |
 | `song_folders` | (none) | Folders with your songs (folders inside them are included). |
 | `output_folder` | (none) | Where to save the MP3. Empty = next to the recording. |
+| `theme` | `auto` | The app's look: `auto` (light or dark, as your computer is set), `light` or `dark`. |
 | `target_minutes` | `60` | Broadcast length. |
 | `tolerance_seconds` | `30` | The songs never make it more than this much longer. |
 | `service_start` | `Auto` | `Auto`, `Organ start` or `Keep start`. |
@@ -443,6 +444,12 @@ history and the speech models are kept.
 
 ## Troubleshooting
 
+**The app's look.** The app is light or dark as your computer is set. To choose yourself: **Settings...**
+→ **The app's look**.
+
+**Linux: the app does not open.** Start it from a terminal (`~/.local/bin/churchradio-studio`) to see
+why. If it names a missing `xcb` library, install it, for example `sudo apt install libxcb-cursor0`.
+
 **The cut at the start or end is wrong.** The log lists every start and end phrase heard, with its
 time and how sure it was. Check that your **Service words** (Settings) match what is actually said,
 and the **Service start** mode. Send `end_words.txt` from your settings folder if you ask for help.
@@ -485,7 +492,8 @@ It prints where the program, your files, ffmpeg and the models are, loads both m
 
 ## For developers
 
-Python 3.11+ with tkinter.
+Python 3.11+. The windows are Qt, through [PySide6](https://doc.qt.io/qtforpython-6/) (installed by the
+line below).
 
 **Run from the source code**
 
@@ -523,9 +531,10 @@ release with the three downloads and `SHA256SUMS.txt`.
 
 | File | What it is |
 |---|---|
-| `app.py` | The main window (and `--build` / `--selftest` from the command line). |
+| `app.py` | Starts the app: the window, or `--build` / `--selftest` / `--uitest` from the command line. |
+| `mainwindow.py` | The main window. |
+| `ui.py` | The look: light and dark colours, the style sheet, the service date box. |
 | `cli.py` | `--build`: making the broadcast with no window, for Task Scheduler. |
-| `datepicker.py` | The service date box and its pop-out calendar. |
 | `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
 | `songs_window.py` | The Songs window. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
@@ -540,7 +549,7 @@ release with the three downloads and `SHA256SUMS.txt`.
 | `churchyear.py` | The church year, patriotic holiday weekends, the default service date. |
 | `paths.py` | Where the program, its defaults and the user's files are. |
 | `config.json` | Default settings (copied to the user's folder on first start). |
-| `assets/` | The icon (`icon.svg` is the source; `icon.ico` and `icon-256.png` are made from it). |
+| `assets/` | The icon (`icon.svg` is the source; `icon.ico` and `icon-256.png` are made from it) and two small pictures for tick boxes and drop-down arrows. |
 | `ChurchRadio-Studio.spec` | PyInstaller recipe. |
 | `installer.iss` | Inno Setup recipe for the installer. |
 | `ChurchRadio Studio.bat` | Starts the app from the source code on Windows. |
@@ -565,10 +574,12 @@ from what the program actually includes.
 - **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (MIT) with
   **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** (MIT), and the **Whisper** speech models
   `base.en` and `small.en` (MIT), downloaded on first use.
-- **[tkinterdnd2](https://github.com/Eliav2/tkinterdnd2)** (MIT) — drag and drop.
+- **[Qt](https://www.qt.io)** through **[PySide6](https://doc.qt.io/qtforpython-6/)** (LGPL 3) — the windows. The Qt
+  libraries are separate files in the program folder, so they can be replaced; the license list says
+  where the source code is.
 - **[NumPy](https://numpy.org)** (BSD), **[PyAV](https://github.com/PyAV-Org/PyAV)** (BSD), Hugging Face
   **huggingface_hub** and **tokenizers** (Apache 2.0), **ONNX Runtime** (MIT), and their dependencies.
-- **Python** (PSF License) and **Tcl/Tk** (BSD-style), built into the program.
+- **Python** (PSF License), built into the program.
 
 ## Reporting a security problem
 

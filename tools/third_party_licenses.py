@@ -4,7 +4,7 @@ Run by the release workflow after the dependencies are installed:
     python tools/third_party_licenses.py build/licenses/THIRD-PARTY-LICENSES.txt
 It walks the dependency tree of the packages in requirements.txt (only what the program can
 load, not the build tools), copies each package's license and notice files, and adds Python's
-and Tcl/Tk's licenses and a note on the speech models. ffmpeg's license ships in its own folder.
+license and notes on Qt (LGPL) and the speech models. ffmpeg's license ships in its own folder.
 """
 import importlib.metadata as md
 import os
@@ -67,22 +67,24 @@ def license_texts(dist):
     return out
 
 
-def python_and_tk():
+QT_NOTE = """Qt (the windows of the app) is used through PySide6 under the GNU Lesser General Public License
+version 3 (LGPL-3.0). Qt is copyright (C) The Qt Company Ltd and other contributors.
+The Qt and PySide6 libraries are separate files in the program folder (PySide6 and shiboken6 inside
+_internal): you may replace them with your own builds of the same versions.
+Source code: https://download.qt.io/official_releases/qt/ and
+https://download.qt.io/official_releases/QtForPython/pyside6/
+The license texts (LGPL-3.0 and the GPL-3.0 it refers to) are with the PySide6 packages below and at
+https://www.gnu.org/licenses/lgpl-3.0.txt and https://www.gnu.org/licenses/gpl-3.0.txt
+Qt also includes third-party parts under their own licenses: https://doc.qt.io/qt-6/licenses-used-in-qt.html"""
+
+
+def python_license():
     parts = []
     for p in (os.path.join(sys.base_prefix, "LICENSE.txt"),
               os.path.join(sys.base_prefix, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "LICENSE.txt")):
         if os.path.isfile(p):
             parts.append((f"Python {sys.version.split()[0]} (PSF License)", open(p, encoding="utf-8", errors="replace").read()))
             break
-    try:
-        import tkinter
-        lib = tkinter.Tcl().eval("info library")
-        for name, folder in (("Tcl", lib), ("Tk", lib.replace("tcl8", "tk8"))):
-            p = os.path.join(folder, "license.terms")
-            if os.path.isfile(p):
-                parts.append((f"{name} (BSD-style license)", open(p, encoding="utf-8", errors="replace").read()))
-    except Exception:  # noqa: BLE001  no Tk in this Python: nothing to add
-        pass
     return parts
 
 
@@ -91,6 +93,7 @@ def main(out_path):
     lines = ["ChurchRadio Studio includes the following third-party software.",
              "ChurchRadio Studio itself is MIT licensed: see LICENSE.txt in this folder.",
              "ffmpeg (LGPL) is in the ffmpeg folder, with its own license and README.",
+             "", QT_NOTE, "",
              "The Whisper speech models (base.en, small.en; converted by SYSTRAN for faster-whisper)",
              "are MIT licensed and are downloaded on first use, not included in the installer.", ""]
     lines.append("Packages: " + ", ".join(f"{d.metadata['Name']} {d.version} ({license_name(d)})"
@@ -101,7 +104,7 @@ def main(out_path):
         texts = license_texts(d)
         lines += [f"--- {name} ---\n{text}" for name, text in texts] or ["(no license file in the package; license: "
                                                                          + license_name(d) + ")"]
-    for title, text in python_and_tk():
+    for title, text in python_license():
         lines += ["", "=" * 78, title, "=" * 78, text.strip()]
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:

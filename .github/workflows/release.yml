@@ -6,7 +6,7 @@ on:
       version:
         description: "Release tag (e.g. v1.0.0)"
         required: true
-        default: "v1.0.0"
+        default: "v1.1.0"
   push:
     tags:
       - "v*"
@@ -146,6 +146,7 @@ jobs:
       # church volunteer would), then run the installed program in --selftest mode. It must
       # find the ffmpeg that was installed with it, keep its files in %APPDATA%, and download
       # the speech models ONCE to the shared ProgramData folder (run 2 loads them from disk).
+      # --uitest then makes every window once, off screen: the Qt parts are in the program.
       # ------------------------------------------------------------------
       - name: Install and smoke test
         shell: pwsh
@@ -182,6 +183,11 @@ jobs:
           $o2 = Invoke-Selftest
           if ($o2 -notmatch "PRESENT before load" -or $o2 -match "MISSING before load") { throw "Run 2 would download the models again." }
           if ($o2 -notmatch "selftest: OK") { throw "Selftest run 2 failed." }
+
+          Write-Host "=== Window test (--uitest: every window is made once, off screen) ==="
+          $ui = (& $exe --uitest 2>&1 | ForEach-Object { [string]$_ }) -join "`n"
+          Write-Host $ui
+          if ($ui -notmatch "uitest: OK") { throw "The windows could not be made (--uitest)." }
 
           Write-Host "=== Headless build (--build, as Task Scheduler runs it) ==="
           # A 2-minute test recording with the date in its name. It has no speech, so the start and
@@ -314,6 +320,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+
+      # Qt (the app's windows) needs these system libraries. They are installed before the build so
+      # that PyInstaller puts the ones Linux desktops do not all have (libxcb-cursor) in the program.
+      - name: Install the libraries Qt needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libxcb-xkb1 libfontconfig1 libdbus-1-3
 
       - name: Install dependencies
         run: |

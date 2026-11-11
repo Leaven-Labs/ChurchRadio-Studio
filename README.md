@@ -23,7 +23,7 @@ podcast or website). Drop the week's recording on the window and it makes one re
 
 Everything runs **on your own PC**. The speech recognition is downloaded once and then works
 offline. Nothing about your services leaves the PC; the only thing that ever does is a song's title,
-when you click **Public domain...** to look songs up.
+when you click **Check public domain...** to look songs up.
 
 Created by **Aaron Steger** for **Bethany Lutheran Church**, Fredericksburg, Texas, and its weekly
 radio broadcast, and shared so other congregations can use it. Published by
@@ -192,8 +192,9 @@ Every change is saved at once.
   time). Holy Week also uses Lent songs. **Patriotic** songs play only on the weekend nearest a
   holiday you chose, and then come first.
 - **Play** — opens the song in your music player.
-- **Find** / **Show** — search by name, or show only songs that are on, off, have no words, are or
-  aren't in the public domain, or haven't been looked up yet.
+- **Find** / **Show** — search by name, or show only songs that are on, off, have no words, are in
+  the public domain, are allowed to broadcast (public domain, a free license or your permission),
+  need permission, or haven't been looked up yet.
 - **Look for new songs** — scan your song folders again.
 
 ### Add songs
@@ -210,8 +211,22 @@ A table shows each suggestion, how it was found and the words heard; unsure ones
 anything, untick songs you don't want, choose the folder for them, and click **Add**: the files are
 copied there and added to your list.
 
-**Identify...** does the same for songs already in your list — the ones you select, or with none
-selected, every song without a title.
+The tick box **Also check whether each song is in the public domain** (on by default; needs the
+internet) runs the [public-domain lookup](#public-domain) on each song as it is identified, shows the
+answer in the table and saves it with the song. You can tick or untick it at any time: ticking it
+looks up the songs already done too.
+
+**Identify...** does the same for songs already in your list. Choose the songs: the ones you
+selected, every song without a title, or **all songs** (a bulk scan). Two options:
+
+- **Keep the titles and seasons songs already have** (on by default) — only songs with no title get a
+  suggestion. The others are still listened to, and if their words sound like another hymn, the
+  **Found by** column says so.
+- **Also check whether each song is in the public domain** — the same tick box as in Add songs,
+  for one song or many. If you rename a song in the table, it is looked up again. Offline, the scan
+  carries on without it.
+
+Listening takes a few seconds per song, so a bulk scan of a large list can take a while.
 
 ### Import a song list
 
@@ -223,7 +238,9 @@ CSV), then click **Import a file...**. Columns:
 - `title` — the song name;
 - `seasons` — [season words](#teach-it-your-own-songs) separated by `;` (`Holy Week` and `General`
   also work); empty or `general` = any time;
-- `enabled` — `yes` or `no`.
+- `enabled` — `yes` or `no`;
+- `permission` — why you may broadcast the song, if it isn't in the public domain (for example
+  `CCLI Streaming License 123456`). See [Public domain](#public-domain).
 
 For a song already in the list, an empty cell keeps what is there. A new song with no seasons gets
 them guessed from its file and folder name. Files are not copied; they stay where they are. Lines that
@@ -231,18 +248,27 @@ can't be used (file not found, unknown season) are skipped and listed.
 
 ### Public domain
 
-**Songs... → Public domain...** looks up each title on [Wikidata](https://www.wikidata.org) (free,
+**Songs... → Check public domain...** looks up each title on [Wikidata](https://www.wikidata.org) (free,
 open data) and fills the **Public domain** column — for the selected songs, or with none selected,
 every song not looked up yet. It needs the internet and takes a second or two per song; **Stop** keeps
 the songs already done.
 
 - **Yes** — public domain in the US: published before 1931 (the year moves on each January).
+- **Allowed** — under copyright, but you may broadcast it: Wikidata lists a Creative Commons license
+  for it (give the credit it asks for), or you gave a permission (below). A NonCommercial license
+  shows **Check** instead, since it covers only non-commercial use.
 - **No** — under copyright.
 - **Check** — the original is old, but a newer version may be the one sung: "How Great Thou Art" is
   Swedish from 1885, but the English version is from 1949. Also shown when only an original in
   another language was found, when only part of the title matched ("Amazing Grace (My Chains Are
   Gone)"), or when Wikidata's dates disagree.
 - **?** — not found, or no dates to go on.
+
+**Permission...** — if you have permission to broadcast songs that are under copyright (a
+streaming or radio license such as CCLI's, your station's ASCAP/BMI/SESAC licenses, or the writer's
+OK), select them, click **Permission...** and type what it is (for example `CCLI Streaming License
+123456`). They then show as **Allowed**, and the lookup never removes it. Leave it empty to take it
+off. You can also fill the `permission` column in an [imported list](#import-a-song-list).
 
 Click a song to see the reason under the list. Offline, songs in the app's own hymn list are still
 marked (it holds lyrics only for public-domain hymns).
@@ -314,7 +340,8 @@ Most settings are in **Settings...**. All of them are in `config.json` in your
 **Song list (`songs.csv`)** — edited by the Songs window, or open it in Excel. Columns: `file`,
 `title`, `duration`, `seasons`, `enabled` (`yes`/`no`), `words` (empty = not checked yet),
 `start_silence` / `end_silence` (seconds; empty = not measured yet), `public_domain`
-(`yes`/`no`/`check`/`unknown`; empty = not looked up) and `pd_note` (why). If a song folder can't be
+(`yes`/`allowed`/`no`/`check`/`unknown`; empty = not looked up), `pd_note` (why) and `permission`
+(why you may broadcast it; empty = none). If a song folder can't be
 found (moved, or a drive not plugged in), its songs stay in the list with your edits.
 
 ## Where your files are

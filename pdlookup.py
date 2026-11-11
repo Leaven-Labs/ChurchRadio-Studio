@@ -11,8 +11,13 @@ Sources, tried in order (SOURCES). Each returns a result or None for "not found"
 - The app's own hymn list: it holds lyric lines only for public-domain hymns (offline fallback).
 A second online source can be added to SOURCES later without changing the rest.
 
-Result: {"status": "yes" | "no" | "check" | "unknown", "note": text for the person, "source": name}
+Result: {"status": "yes" | "allowed" | "no" | "check" | "unknown", "note": text for the person,
+         "source": name}
   yes     = public domain.
+  allowed = under copyright, but released under a license that lets anyone broadcast it (Creative
+            Commons, from Wikidata's "copyright license"). A NonCommercial license gives "check".
+            A church's own permission (a streaming or radio license, a letter from the writer) is
+            not looked up: the person marks it in the Songs window (catalog column "permission").
   no      = still under copyright.
   check   = the original is old, but a newer version (an English translation, an adaptation) may be
             the one sung; or the match is not certain.
@@ -31,7 +36,8 @@ import paths
 SPARQL_URL = "https://query.wikidata.org/sparql"
 TIMEOUT = 60
 PAUSE = 1.0  # seconds between songs, to be polite to Wikidata
-STATUS_LABELS = {"yes": "Yes", "no": "No", "check": "Check", "unknown": "?"}
+STATUS_LABELS = {"yes": "Yes", "allowed": "Allowed", "no": "No", "check": "Check", "unknown": "?"}
+CLEARED = ("yes", "allowed")  # statuses that may be broadcast
 
 PUBLIC_DOMAIN = "Q19652"  # Wikidata: public domain
 COPYRIGHTED = "Q50423863"  # Wikidata: copyrighted
@@ -46,6 +52,10 @@ HYMN_WORDS = VERSION_WORDS + ("song written", "composed")
 NOT_WORK_WORDS = ("recording", "track", "album", "single", "audio", "film", "episode", "video",
                   "disambiguation", "book", "print", "painting", "edition")
 TRANSLATION_WORDS = ("translat", "english version", "english language version")
+# Licenses that let anyone share (and so broadcast) the work. NonCommercial ones only for
+# non-commercial use, which a radio station may not be: those are "check".
+FREE_LICENSE_WORDS = ("creative commons", "cc0", "cc by", "cc-by")
+NON_COMMERCIAL_WORDS = ("noncommercial", "non-commercial", "-nc", " nc ")
 
 QUERY = """SELECT ?item ?num ?label ?desc
   (GROUP_CONCAT(DISTINCT ?alias; separator="|") AS ?aliases)
@@ -54,6 +64,7 @@ QUERY = """SELECT ?item ?num ?label ?desc
   (GROUP_CONCAT(DISTINCT STR(?status); separator="|") AS ?statuses)
   (MAX(?creatorDied) AS ?creatorsDied) (MAX(?translatorDied) AS ?translatorsDied)
   (GROUP_CONCAT(DISTINCT ?translatorName; separator="|") AS ?translators)
+  (GROUP_CONCAT(DISTINCT ?licenseName; separator="|") AS ?licenses)
 WHERE {
   SERVICE wikibase:mwapi { bd:serviceParam wikibase:endpoint "www.wikidata.org"; wikibase:api "EntitySearch";
       mwapi:search "%s"; mwapi:language "en"; mwapi:limit "15".
@@ -66,6 +77,7 @@ WHERE {
   OPTIONAL { ?item wdt:P50|wdt:P86|wdt:P676 ?creator . ?creator wdt:P570 ?creatorDied }
   OPTIONAL { ?item wdt:P655 ?tr . OPTIONAL { ?tr wdt:P570 ?translatorDied }
              OPTIONAL { ?tr rdfs:label ?translatorName FILTER(LANG(?translatorName) = "en") } }
+  OPTIONAL { ?item wdt:P275 ?lic . ?lic rdfs:label ?licenseName FILTER(LANG(?licenseName) = "en") }
 } GROUP BY ?item ?num ?label ?desc ORDER BY ?num"""
 
 
@@ -153,6 +165,7 @@ def parse(data):
             "creators_died": _year(g("creatorsDied")),
             "translators": [t for t in g("translators").split("|") if t],
             "translators_died": _year(g("translatorsDied")),
+            "licenses": [x for x in g("licenses").split("|") if x],
         })
     return items
 
@@ -167,6 +180,30 @@ def hymn_like(item, words=HYMN_WORDS):
 def is_translation(item):
     text = " ".join([item["desc"]] + item["classes"]).lower()
     return bool(item["translators"]) or any(w in text for w in TRANSLATION_WORDS)
+
+
+def broadcast_license(item):
+    """(license name, non-commercial only) for a license that lets anyone share the work, or None."""
+    for name in item.get("licenses") or []:
+        low = f" {name.lower()} "
+        if any(w in low for w in FREE_LICENSE_WORDS):
+            return name, any(w in low for w in NON_COMMERCIAL_WORDS)
+    return None
+
+
+def _allowed(item, verdict):
+    """A "no" or "unknown" verdict turned into "allowed" (or "check") when the item has a free license."""
+    lic = broadcast_license(item)
+    if not lic or verdict["status"] not in ("no", "unknown"):
+        return verdict
+    name, nc = lic
+    if nc:
+        return {"status": "check", "source": "Wikidata",
+                "note": f"Released under {name}: only for non-commercial use. Check that your broadcast "
+                        f"counts as non-commercial ({_name(item)})."}
+    return {"status": "allowed", "source": "Wikidata",
+            "note": f"Allowed: released under {name}, which lets anyone broadcast it (give the credit it "
+                    f"asks for) ({_name(item)})."}
 
 
 def _when(item, cutoff):
@@ -225,9 +262,11 @@ def judge(title, items, today=None):
                 "note": f"Wikidata gives {why}, but the writer died in {main['creators_died']}: the date is "
                         f"probably of a newer edition ({_name(main)})."}
     if COPYRIGHTED in main["statuses"] or late:
-        return {"status": "no", "note": f"Under copyright: {why} ({_name(main)}).", "source": "Wikidata"}
+        return _allowed(main, {"status": "no", "note": f"Under copyright: {why} ({_name(main)}).",
+                               "source": "Wikidata"})
     if year is None and PUBLIC_DOMAIN not in main["statuses"]:
-        return {"status": "unknown", "note": f"Found {_name(main)} on Wikidata, but {why}.", "source": "Wikidata"}
+        return _allowed(main, {"status": "unknown", "note": f"Found {_name(main)} on Wikidata, but {why}.",
+                               "source": "Wikidata"})
     first = f"public domain ({why})" if year is not None else "marked public domain"
     if norm(main["label"]) != want and not any(norm(o["label"]) == want and _free(o, cutoff) for o in others):
         return {"status": "check", "source": "Wikidata",
@@ -289,7 +328,7 @@ def lookup(title, hymns=(), today=None, sources=None):
             elif r and r["status"] == "yes" and listed and listed["status"] == "check":
                 r = {**r, "status": "check", "note": f"{r['note']} {listed['note']}"}
             if r:
-                if tries != title and r["status"] == "yes":  # matched only a shorter title
+                if tries != title and r["status"] in CLEARED:  # matched only a shorter title
                     r = {**r, "status": "check",
                          "note": f'"{tries}" is {r["note"][0].lower()}{r["note"][1:]} The part of the title '
                                  "taken off (in brackets) may mean a newer version."}

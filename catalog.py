@@ -7,8 +7,11 @@ Columns: file, title, duration, seasons, enabled, words
 - words: how many words the speech model heard in the song (empty = not checked yet).
 - start_silence / end_silence: seconds of silence at the start / end of the song. They are cut
   when the song is played, so there is no gap between songs (empty = not measured yet).
-- public_domain: yes / no / check / unknown from the public-domain lookup (pdlookup.py);
+- public_domain: yes / allowed / no / check / unknown from the public-domain lookup (pdlookup.py);
   empty = not looked up yet. pd_note says why.
+- permission: why the church may broadcast a song that is not in the public domain, typed by the
+  person (e.g. "CCLI Streaming License 123456", "letter from the writer"). Empty = none. The
+  lookup never changes it.
 New songs found in the song folders are added with a guessed season. The Songs window in
 the app edits this file too.
 
@@ -22,7 +25,7 @@ import churchyear
 
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
 FIELDS = ["file", "title", "duration", "seasons", "enabled", "words", "start_silence", "end_silence",
-          "public_domain", "pd_note"]
+          "public_domain", "pd_note", "permission"]
 MIN_WORDS = 6  # a song with fewer words heard than this has no words (instrumental): turned off once
 OFF = ("no", "n", "0", "false")
 
@@ -97,6 +100,12 @@ def is_on(row):
     return (row.get("enabled") or "yes").strip().lower() not in OFF
 
 
+def cleared(row):
+    """True if the song may be broadcast: public domain, a free license, or the church's permission."""
+    return ((row.get("public_domain") or "").strip().lower() in ("yes", "allowed")
+            or bool((row.get("permission") or "").strip()))
+
+
 def check_words(path, rows, count_words, min_words=MIN_WORDS, log=print):
     """Listen once to every song not checked yet and count the words heard.
 
@@ -168,12 +177,14 @@ def songs_for(rows, season, patriotic=False, trim=True):
 
 
 # ---- import a song list ---------------------------------------------------------------------
-IMPORT_FIELDS = ["file", "title", "seasons", "enabled"]
+IMPORT_FIELDS = ["file", "title", "seasons", "enabled", "permission"]
 TEMPLATE_ROWS = [
     {"file": r"C:\Church Songs\A Mighty Fortress.mp3", "title": "A Mighty Fortress Is Our God",
-     "seasons": "", "enabled": "yes"},
-    {"file": "Joy to the World.mp3", "title": "Joy to the World", "seasons": "christmas", "enabled": "yes"},
-    {"file": "Were You There.mp3", "title": "Were You There", "seasons": "lent;holyweek", "enabled": "yes"},
+     "seasons": "", "enabled": "yes", "permission": ""},
+    {"file": "Joy to the World.mp3", "title": "Joy to the World", "seasons": "christmas", "enabled": "yes",
+     "permission": ""},
+    {"file": "In Christ Alone.mp3", "title": "In Christ Alone", "seasons": "", "enabled": "yes",
+     "permission": "CCLI Streaming License 123456"},
 ]
 # Season names people may type in the import file, as well as the season words themselves.
 SEASON_ALIASES = {"holy week": "holyweek", "general": "", "any": "", "all": ""}
@@ -236,7 +247,7 @@ def import_csv(path, import_path, folders, get_duration, get_edges=None, log=pri
     """Add the songs in import_path to the song list at path, or update them if already there.
 
     Columns: file (a full path, or a file name in one of the song folders), title, seasons,
-    enabled. For a song already in the list an empty cell keeps what is there now; a new song
+    enabled, permission. For a song already in the list an empty cell keeps what is there now; a new song
     with no seasons gets them guessed from its file name, as songs found in the folders do.
     Returns (rows, added, updated, problems): problems are lines for the person to read.
     """
@@ -283,6 +294,8 @@ def import_csv(path, import_path, folders, get_duration, get_edges=None, log=pri
             row["seasons"] = seasons
         if enabled:
             row["enabled"] = "yes" if enabled in YES else "no"
+        if r.get("permission"):
+            row["permission"] = r["permission"]
         if not row.get("duration"):
             try:
                 row["duration"] = f"{get_duration(found):.1f}"

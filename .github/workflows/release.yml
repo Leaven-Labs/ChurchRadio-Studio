@@ -414,13 +414,13 @@ jobs:
   # ------------------------------------------------------------------
   macos:
     name: macOS .dmg
-    runs-on: macos-14
+    runs-on: macos-15
 
     env:
       PYTHONUNBUFFERED: "1"
       FFMPEG_VERSION: "7.1.1"
       LAME_VERSION: "3.100"
-      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      MACOSX_DEPLOYMENT_TARGET: "14.0"  # onnxruntime and PyAV need macOS 14
 
     steps:
       - name: Check out
@@ -458,7 +458,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/ffmpeg-mac
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}-lame-${{ env.LAME_VERSION }}-macos12-arm64-v1
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-lame-${{ env.LAME_VERSION }}-macos14-arm64-v1
 
       - name: Build ffmpeg (LGPL, with LAME for MP3)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'

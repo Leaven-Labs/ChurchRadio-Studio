@@ -125,7 +125,7 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "ChurchRadio Studio",
             "CFBundleShortVersionString": version,
             "NSHighResolutionCapable": True,
-            "LSMinimumSystemVersion": "12.0",
+            "LSMinimumSystemVersion": "14.0",  # onnxruntime and PyAV wheels need macOS 14
             "NSHumanReadableCopyright": "Copyright (c) 2026 Aaron Steger. MIT License.",
         },
     )

@@ -62,7 +62,7 @@ speech models (about 620 MB); after that the app works offline. Download from th
 | Your computer | Download |
 |---|---|
 | Windows 10 or 11 (64-bit) | `ChurchRadio-Studio-Setup.exe` |
-| Mac with Apple silicon (M1 or newer), macOS 12 or newer | `ChurchRadio-Studio-macOS.dmg` |
+| Mac with Apple silicon (M1 or newer), macOS 14 (Sonoma) or newer | `ChurchRadio-Studio-macOS.dmg` |
 | Linux, 64-bit (Ubuntu 22.04 or newer, or another distribution of the same age) | `ChurchRadio-Studio-Linux-x86_64.tar.gz` |
 
 **Windows**

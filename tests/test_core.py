@@ -603,7 +603,9 @@ class Paths(unittest.TestCase):
     def test_mac_and_linux_folders(self):
         with tempfile.TemporaryDirectory() as d:
             home = os.path.join(d, "home")
-            env = {"CHURCHRADIO_DATA_DIR": "", "HOME": home, "XDG_CONFIG_HOME": "", "XDG_CACHE_HOME": ""}
+            # USERPROFILE: where Python finds "~" when the tests run on Windows.
+            env = {"CHURCHRADIO_DATA_DIR": "", "HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": "",
+                   "XDG_CACHE_HOME": ""}
             with mock.patch.dict(os.environ, env):
                 with mock.patch.object(paths.sys, "platform", "darwin"):
                     self.assertEqual(paths.data_dir(),
@@ -613,7 +615,8 @@ class Paths(unittest.TestCase):
                     with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(d, "xdg")}):
                         self.assertEqual(paths.data_dir(), os.path.join(d, "xdg", "churchradio-studio"))
                 with mock.patch.object(prelude.platform, "system", return_value="Darwin"):
-                    self.assertEqual(prelude.fixed_models_dir(), "/Users/Shared/ChurchRadio Studio/models")
+                    self.assertEqual(prelude.fixed_models_dir(),
+                                     os.path.join("/Users/Shared", "ChurchRadio Studio", "models"))
                 with mock.patch.object(prelude.platform, "system", return_value="Linux"):
                     self.assertEqual(prelude.fixed_models_dir(),
                                      os.path.join(home, ".cache", "churchradio-studio", "models"))
@@ -666,13 +669,14 @@ class Paths(unittest.TestCase):
                 self.assertEqual(audio.find_tool("ffmpeg"), mine)
             # Started from the Dock, a Mac app has no Homebrew on PATH: its folder is tried anyway.
             os.remove(mine)
+            brew = os.path.join("/opt/homebrew/bin", "ffmpeg")
             with mock.patch.object(audio, "_tools", {}), mock.patch.object(audio.sys, "platform", "darwin"), \
                     mock.patch.object(paths, "program_dir", return_value=d), \
                     mock.patch.object(paths, "resources_dir", return_value=d), \
                     mock.patch.object(audio.shutil, "which", return_value=None), \
-                    mock.patch.object(audio.os.path, "exists", side_effect=lambda p: p == "/opt/homebrew/bin/ffmpeg"), \
+                    mock.patch.object(audio.os.path, "exists", side_effect=lambda p: p == brew), \
                     mock.patch.object(audio.subprocess, "run"):
-                self.assertEqual(audio.find_tool("ffmpeg"), "/opt/homebrew/bin/ffmpeg")
+                self.assertEqual(audio.find_tool("ffmpeg"), brew)
             with mock.patch.object(audio, "_tools", {}), mock.patch.object(audio.sys, "platform", "linux"), \
                     mock.patch.object(paths, "program_dir", return_value=d), \
                     mock.patch.object(paths, "resources_dir", return_value=d), \

@@ -2,6 +2,7 @@
 
 With --build it makes the broadcast with no window instead (cli.py), for Task Scheduler."""
 import atexit
+import multiprocessing
 import os
 import queue
 import sys
@@ -316,6 +317,11 @@ def make_root():
 
 
 def main():
+    # Python starts helper processes by running this program again (on macOS, the "resource
+    # tracker" when the speech models are downloaded). In the packaged app, freeze_support() makes
+    # such a run do the helper's job and exit. Without it the helper opened a second app window,
+    # took its arguments for a recording to build, and hung.
+    multiprocessing.freeze_support()
     builder.ensure_user_files()
     if cli.build_args(sys.argv[1:]):  # --build: no window, for Task Scheduler
         sys.exit(cli.main(sys.argv[1:]))

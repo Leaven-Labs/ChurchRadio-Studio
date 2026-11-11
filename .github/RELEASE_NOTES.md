@@ -8,9 +8,6 @@ Already installed? Run the new installer: it updates in place and keeps your set
 
 ## What's new
 
-- **Import a song list.** Songs... → Import list... adds many songs at once (or changes their titles, seasons and on/off) from a CSV file. Click **Download template...** for a file to start from.
-- **Pick the service date from a calendar.** Click the date in the main window to choose another day.
-- **The service date starts on the coming Sunday** (or today, on a Sunday). A date in the recording's file name is still used unless you picked one in the calendar.
-- **Is a song in the public domain?** Songs... → Public domain... looks each song up on Wikidata and shows Yes, No or Check in a new column, with the reason underneath. It's a guide about the song, not the recording, and not legal advice.
+- **Make the broadcast automatically with Windows Task Scheduler.** `ChurchRadio-Studio.exe --build "D:\OBS Recordings"` makes the broadcast from the newest recording in the folder, with no window. It skips a recording that's already done or still being written, writes a log of each run, and tells Task Scheduler whether it worked. See [Making it automatically](https://github.com/Leaven-Labs/ChurchRadio-Studio#making-it-automatically-task-scheduler) for the set-up.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the installer's checksum.

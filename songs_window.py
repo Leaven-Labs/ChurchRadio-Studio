@@ -3,22 +3,32 @@
 Every change is saved to songs.csv at once (the same file Excel opens).
 """
 import os
+import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import audio
 import catalog
 import churchyear
+import pdlookup
 
 SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epiphany", "lent": "Lent",
                  "holyweek": "Holy Week", "easter": "Easter", "pentecost": "Pentecost",
                  churchyear.PATRIOTIC: "Patriotic"}
-SHOW = ("All songs", "On", "Off", "No words")
-COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 300, "w"), ("seasons", "Seasons", 170, "w"),
-           ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("file", "File", 230, "w"))
+SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Not public domain", "Not looked up")
+COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 280, "w"), ("seasons", "Seasons", 150, "w"),
+           ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("pd", "Public domain", 105, "center"),
+           ("file", "File", 200, "w"))
+PD_ABOUT = ("The app looks up each song's title on Wikidata (free, open data) and says whether the song "
+            "(its words and tune) is in the public domain in the US: published before {first}.\n\n"
+            "Yes = public domain. No = under copyright. Check = the original is old, but a newer version "
+            "(for example an English translation) may be the one sung. ? = not found.\n\n"
+            "This is a guide, not legal advice. It is about the song, not the recording: a modern "
+            "recording or arrangement of an old hymn is still protected.")
 
 
 def title_of(row):
@@ -40,6 +50,11 @@ def matches(row, show, find, min_words=catalog.MIN_WORDS):
     if show == "On" and not catalog.is_on(row) or show == "Off" and catalog.is_on(row):
         return False
     if show == "No words" and not no_words(row, min_words):
+        return False
+    pd = (row.get("public_domain") or "").strip().lower()
+    if show == "Public domain" and pd != "yes" or show == "Not public domain" and pd not in ("no", "check"):
+        return False
+    if show == "Not looked up" and pd:
         return False
     find = find.strip().lower()
     return not find or find in title_of(row).lower() or find in os.path.basename(row["file"]).lower()
@@ -96,7 +111,7 @@ class SongsWindow:
         self.rows = catalog.load(csv_path)
         self.win = w = tk.Toplevel(parent)
         w.title("Songs")
-        w.geometry("900x560")
+        w.geometry("1010x580")
         w.transient(parent)
         w.grab_set()  # no build while songs are edited
 
@@ -108,12 +123,14 @@ class SongsWindow:
         ttk.Entry(top, textvariable=self.find, width=24).pack(side="left", padx=(4, 12))
         ttk.Label(top, text="Show:").pack(side="left")
         self.show = tk.StringVar(value=SHOW[0])
-        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=10, textvariable=self.show)
+        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=17, textvariable=self.show)
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self.fill())
         self.find_btn = ttk.Button(top, text="Look for new songs", command=self.rescan)
         self.find_btn.pack(side="right")
         ttk.Button(top, text="Add songs...", command=self.add_songs).pack(side="right", padx=6)
+        self.import_btn = ttk.Button(top, text="Import list...", command=self.import_list)
+        self.import_btn.pack(side="right")
 
         ttk.Label(w, text="Click On to turn a song on or off. Double-click a title to rename it, "
                           "or Seasons to choose when it plays.").pack(fill="x", padx=10)
@@ -132,6 +149,9 @@ class SongsWindow:
         self.tree.bind("<Double-1>", self.double_click)
         self.tree.bind("<space>", lambda e: self.set_on(None))
         self.tree.bind("<Return>", lambda e: self.play_selected())
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self.show_note())
+        self.note = ttk.Label(w, foreground="#555555", wraplength=980, justify="left")
+        self.note.pack(fill="x", padx=10)
 
         bottom = ttk.Frame(w)
         bottom.pack(fill="x", padx=10, pady=(4, 10))
@@ -141,9 +161,13 @@ class SongsWindow:
         ttk.Button(bottom, text="Rename...", command=self.rename_selected).pack(side="left", padx=(12, 0))
         ttk.Button(bottom, text="Seasons...", command=self.seasons_selected).pack(side="left", padx=4)
         ttk.Button(bottom, text="Identify...", command=self.identify_selected).pack(side="left", padx=(12, 0))
+        self.pd_btn = ttk.Button(bottom, text="Public domain...", command=self.public_domain)
+        self.pd_btn.pack(side="left", padx=4)
         ttk.Button(bottom, text="Close", command=w.destroy).pack(side="right")
         self.status = ttk.Label(bottom, text="")
         self.status.pack(side="right", padx=12)
+        self.pd_running = False
+        w.bind("<Destroy>", lambda e: e.widget is w and setattr(self, "pd_running", False))
 
         self.fill()
         if not self.rows:
@@ -169,8 +193,9 @@ class SongsWindow:
 
     def values(self, r):
         w = (r.get("words") or "").strip()
+        pd = pdlookup.STATUS_LABELS.get((r.get("public_domain") or "").strip().lower(), "")
         return ("✔" if catalog.is_on(r) else "", title_of(r), seasons_text(r),
-                audio.fmt(catalog._duration(r)), w if w else "-", os.path.basename(r["file"]))
+                audio.fmt(catalog._duration(r)), w if w else "-", pd, os.path.basename(r["file"]))
 
     def refresh(self, key):
         r = self.rows[key]
@@ -311,6 +336,183 @@ class SongsWindow:
         self.rows = catalog.load(self.path)
         self.fill()
         self.win.grab_set()
+
+    def import_list(self):
+        """Explain the import file, offer the template, then import the file the person picks."""
+        dlg = tk.Toplevel(self.win)
+        dlg.title("Import song list")
+        dlg.transient(self.win)
+        dlg.resizable(False, False)
+        text = ("Add many songs at once, or change their titles, seasons and on/off, from a CSV file "
+                "(Excel: Save As \u2192 CSV).\n\n"
+                "Columns:\n"
+                "  file \u2014 the song's full path, or its file name if it is in one of your song folders\n"
+                "  title \u2014 the song name\n"
+                "  seasons \u2014 advent, christmas, epiphany, lent, holyweek, easter, pentecost or\n"
+                "      patriotic, separated by ; (empty or general = any time of the year)\n"
+                "  enabled \u2014 yes or no\n\n"
+                "For a song already in your list, an empty cell keeps what is there now. "
+                "The song files are not copied: they stay where they are.")
+        ttk.Label(dlg, text=text, justify="left", wraplength=520).pack(anchor="w", padx=14, pady=(14, 10))
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", padx=14, pady=(0, 14))
+
+        def template():
+            from tkinter import filedialog
+            f = filedialog.asksaveasfilename(parent=dlg, title="Save the template", defaultextension=".csv",
+                                             initialfile="song import template.csv",
+                                             filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            if not f:
+                return
+            try:
+                catalog.write_template(f)
+            except OSError as e:
+                messagebox.showerror("Import song list", f"Could not save the template:\n{e}", parent=dlg)
+                return
+            if messagebox.askyesno("Import song list", "Template saved. Replace the example rows with your "
+                                   "songs, save it, then click Import a file....\n\nOpen it now?", parent=dlg):
+                try:
+                    play(f)  # opens it in Excel (or the PC's CSV program)
+                except OSError as e:
+                    messagebox.showerror("Import song list", str(e), parent=dlg)
+
+        def pick():
+            from tkinter import filedialog
+            f = filedialog.askopenfilename(parent=dlg, title="Song list to import",
+                                           filetypes=(("CSV files", "*.csv"), ("All files", "*.*")))
+            if f:
+                dlg.destroy()
+                self.run_import(f)
+
+        ttk.Button(btns, text="Download template...", command=template).pack(side="left")
+        ttk.Button(btns, text="Close", command=dlg.destroy).pack(side="right")
+        ttk.Button(btns, text="Import a file...", command=pick).pack(side="right", padx=6)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.bind("<Destroy>", lambda e: e.widget is dlg and self.win.after_idle(self.regrab))
+        dlg.update_idletasks()
+        dlg.geometry(f"+{self.win.winfo_rootx() + (self.win.winfo_width() - dlg.winfo_width()) // 2}"
+                     f"+{self.win.winfo_rooty() + (self.win.winfo_height() - dlg.winfo_height()) // 3}")
+        dlg.grab_set()
+
+    def show_note(self):
+        """Under the list: why the selected song is (or is not) in the public domain."""
+        keys = self.selected()
+        r = self.rows.get(keys[0]) if len(keys) == 1 else None
+        note = (r.get("pd_note") or "").strip() if r else ""
+        self.note.config(text=f"Public domain: {note}" if note else "")
+
+    def public_domain(self):
+        """Look up whether the selected songs (or every song not looked up yet) are in the public domain."""
+        if self.pd_running:  # the button says Stop while it runs
+            self.pd_running = False
+            self.pd_btn.config(text="Stopping ...")
+            self.pd_btn.state(["disabled"])
+            return
+        keys = self.selected() or [k for k, r in self.rows.items() if not (r.get("public_domain") or "").strip()]
+        if not keys:
+            messagebox.showinfo("Public domain", "Every song has been looked up. Select songs to look them up "
+                                "again.", parent=self.win)
+            return
+        about = PD_ABOUT.format(first=pdlookup.cutoff_year() + 1)
+        if not messagebox.askokcancel("Public domain", f"Look up {len(keys)} song(s)? This needs the internet "
+                                      f"and takes a second or two per song.\n\n{about}", parent=self.win):
+            return
+        hymns = []
+        try:
+            import identify
+            import paths
+            hymns = identify.load_hymns(os.path.join(paths.bundled_dir(), "hymns.csv"))
+        except (OSError, ValueError):
+            pass
+        self.pd_running = True
+        self.pd_btn.config(text="Stop")
+        q = queue.Queue()
+
+        def work():
+            for i, k in enumerate(keys):
+                if not self.pd_running:
+                    break
+                q.put(("progress", i))
+                try:
+                    q.put(("done", k, pdlookup.lookup(title_of(self.rows[k]), hymns)))
+                except pdlookup.LookupError_ as e:
+                    q.put(("error", str(e)))
+                    return
+                time.sleep(pdlookup.PAUSE)
+            q.put(("finished",))
+
+        def poll():
+            if not self.win.winfo_exists():
+                return
+            while not q.empty():
+                msg = q.get()
+                if msg[0] == "progress":
+                    self.status.config(text=f"Looking up song {msg[1] + 1} of {len(keys)} ...")
+                elif msg[0] == "done":
+                    k, r = msg[1], msg[2]
+                    if k in self.rows:
+                        self.rows[k]["public_domain"], self.rows[k]["pd_note"] = r["status"], r["note"]
+                        self.save()
+                        self.refresh(k)
+                        self.show_note()
+                else:
+                    self.pd_running = False
+                    self.pd_btn.config(text="Public domain...")
+                    self.pd_btn.state(["!disabled"])
+                    self.fill()
+                    if msg[0] == "error":
+                        messagebox.showerror("Public domain", msg[1], parent=self.win)
+                    return
+            self.win.after(150, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        poll()
+
+    def regrab(self):
+        """Keep the main window blocked while Songs is open (a box closing frees it)."""
+        if self.win.winfo_exists():
+            self.win.grab_set()
+
+    def run_import(self, import_path):
+        """Import in the background (new songs are measured, which can take a minute)."""
+        self.import_btn.state(["disabled"])
+        self.status.config(text="Importing the song list ...")
+        result = {}
+
+        def work():
+            try:
+                result["out"] = catalog.import_csv(self.path, import_path, self.folders, audio.duration,
+                                                   get_edges=self.get_edges, log=lambda m: None)
+            except (OSError, ValueError, KeyError) as e:
+                result["error"] = str(e)
+
+        def wait():
+            if not self.win.winfo_exists():
+                return
+            if t.is_alive():
+                self.win.after(200, wait)
+                return
+            self.win.grab_set()
+            self.import_btn.state(["!disabled"])
+            if "error" in result:
+                self.status.config(text=self.counts)
+                messagebox.showerror("Import song list", f"Could not import the song list:\n{result['error']}\n\n"
+                                     "If songs.csv is open in Excel, close it and try again.", parent=self.win)
+                return
+            self.rows, added, updated, problems = result["out"]
+            self.fill()
+            msg = f"{added} song(s) added, {updated} updated."
+            self.status.config(text=f"{msg} {self.counts}")
+            if problems:
+                more = f"\n... and {len(problems) - 15} more." if len(problems) > 15 else ""
+                messagebox.showwarning("Import song list", f"{msg}\n\nThese lines were skipped:\n"
+                                       + "\n".join(problems[:15]) + more, parent=self.win)
+            else:
+                messagebox.showinfo("Import song list", msg, parent=self.win)
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        wait()
 
     def rescan(self):
         """Look in the song folders for new songs (reads their lengths; can take a minute)."""

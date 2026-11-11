@@ -1,5 +1,4 @@
 """ChurchRadio Studio window. Drop a service recording on it to make the broadcast MP3."""
-import datetime as dt
 import os
 import queue
 import sys
@@ -10,6 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 import audio
 import builder
 import churchyear
+import datepicker
 import paths
 import prelude
 import setup_wizard
@@ -91,8 +91,8 @@ class App:
         self.settings_btn.pack(side="right")
         self.songs_btn = ttk.Button(row, text="Songs...", command=self.songs)
         self.songs_btn.pack(side="right", padx=6)
-        ttk.Label(row, text="   Service date (MM/DD/YYYY, blank = from file name):").pack(side="left")
-        self.date = ttk.Entry(row, width=12)
+        ttk.Label(row, text="   Service date:").pack(side="left", padx=(0, 4))
+        self.date = datepicker.DateField(row)
         self.date.pack(side="left")
         row2 = ttk.Frame(root)
         row2.pack(fill="x", padx=12, pady=(6, 0))
@@ -194,16 +194,9 @@ class App:
     def start(self, path):
         if self.busy:
             return
-        date = None
-        if self.date.get().strip():
-            try:
-                date = dt.datetime.strptime(self.date.get().strip(), "%m/%d/%Y").date()
-            except ValueError:
-                messagebox.showerror("Date", "Use MM/DD/YYYY, for example 12/07/2026.")
-                return
-        elif not churchyear.date_from_filename(os.path.basename(path)):
-            if not messagebox.askyesno("Date", "No date in the file name. Use today's date for the season?"):
-                return
+        date = churchyear.service_date(self.date.get(), self.date.changed, os.path.basename(path))
+        if date != self.date.get():
+            self.date.set_date(date)  # show the date read from the file name
         self.busy, self.warning = True, None
         self.songs_btn.state(["disabled"])
         self.settings_btn.state(["disabled"])

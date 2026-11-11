@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import os
 import sys
 import tempfile
@@ -936,3 +937,252 @@ class AddSongsHelpers(unittest.TestCase):
         self.assertFalse(r["no_words"])
         self.assertEqual(r["title"], "Amazing Grace")
         cw.assert_not_called()  # enough words heard already: no second listen
+
+
+class ServiceDate(unittest.TestCase):
+    def test_default_is_the_coming_sunday(self):
+        self.assertEqual(cy.default_service_date(D(2026, 11, 11)), D(2026, 11, 15))  # Wednesday
+        self.assertEqual(cy.default_service_date(D(2026, 11, 14)), D(2026, 11, 15))  # Saturday
+        self.assertEqual(cy.default_service_date(D(2026, 11, 15)), D(2026, 11, 15))  # Sunday: today
+        self.assertEqual(cy.default_service_date(D(2026, 11, 16)), D(2026, 11, 22))  # Monday
+        self.assertEqual(cy.default_service_date(D(2026, 12, 31)), D(2027, 1, 3))   # over the new year
+
+    def test_which_date_is_used(self):
+        shown, today = D(2026, 11, 15), D(2026, 11, 11)
+        # Picked in the calendar: always that date.
+        self.assertEqual(cy.service_date(D(2026, 11, 8), True, "BLC10.11.2026.mkv", today), D(2026, 11, 8))
+        # Not picked: the date in the file name, else the coming Sunday.
+        self.assertEqual(cy.service_date(shown, False, "BLC10.11.2026.mkv", today), D(2026, 10, 11))
+        self.assertEqual(cy.service_date(D(2026, 10, 11), False, "service.mkv", today), D(2026, 11, 15))
+
+
+try:
+    import datepicker  # noqa: E402  (needs tkinter)
+except ImportError:
+    datepicker = None
+
+
+@unittest.skipIf(datepicker is None, "tkinter not installed")
+class Calendar(unittest.TestCase):
+    def test_month_grid_starts_on_sunday(self):
+        weeks = datepicker.month_weeks(2026, 11)  # 1 November 2026 is a Sunday
+        self.assertEqual(weeks[0][0], D(2026, 11, 1))
+        self.assertTrue(all(len(w) == 7 for w in weeks))
+        self.assertEqual([d for w in weeks for d in w if d][-1], D(2026, 11, 30))
+        self.assertEqual(datepicker.month_weeks(2026, 12)[0][:2], [None, None])  # 1 Dec is a Tuesday
+        self.assertEqual(datepicker.add_months(D(2026, 12, 20), 1), D(2027, 1, 1))
+        self.assertEqual(datepicker.add_months(D(2026, 1, 31), -1), D(2025, 12, 1))
+
+
+class ImportSongList(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        self.songs = os.path.join(self.d, "songs")
+        os.makedirs(os.path.join(self.songs, "Christmas"))
+        for n in ("Hymn.mp3", os.path.join("Christmas", "Joy.mp3"), "Old.mp3"):
+            open(os.path.join(self.songs, n), "w").close()
+        self.csv = os.path.join(self.d, "songs.csv")
+        old = os.path.join(self.songs, "Old.mp3")
+        catalog.save(self.csv, {old: {"file": old, "title": "Old Title", "duration": "100", "seasons": "lent",
+                                      "enabled": "yes", "words": "40"}})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, text, encoding="utf-8"):
+        p = os.path.join(self.d, "import.csv")
+        with open(p, "w", encoding=encoding, newline="") as fh:
+            fh.write(text)
+        return p
+
+    def test_template_imports_its_own_columns(self):
+        p = os.path.join(self.d, "template.csv")
+        catalog.write_template(p)
+        fields, rows = catalog._read_any(p)
+        self.assertEqual(fields, catalog.IMPORT_FIELDS)
+        self.assertEqual(len(rows), len(catalog.TEMPLATE_ROWS))
+        for r in rows:
+            catalog.parse_seasons(r["seasons"])  # the examples use valid season words
+
+    def test_seasons(self):
+        self.assertEqual(catalog.parse_seasons("Advent; Christmas"), "advent;christmas")
+        self.assertEqual(catalog.parse_seasons("lent, Holy Week"), "lent;holyweek")
+        self.assertEqual(catalog.parse_seasons("General"), "")
+        self.assertEqual(catalog.parse_seasons("Patriotic"), "patriotic")
+        with self.assertRaises(ValueError):
+            catalog.parse_seasons("summer")
+
+    def test_import_adds_updates_and_reports(self):
+        full = os.path.join(self.songs, "Hymn.mp3")
+        p = self.write("File,Title,Seasons,Enabled\n"
+                       f"{full},A Mighty Fortress,,yes\n"
+                       "Joy.mp3,Joy to the World,,\n"     # name only: found in a sub folder
+                       "Old.mp3,,Easter,no\n"              # empty title keeps the old one
+                       ",,,\n"                             # empty line: ignored
+                       "Missing.mp3,Nope,,\n"
+                       "Hymn.mp3,Bad,summer,\n"
+                       "Hymn.mp3,Bad,,maybe\n")
+        rows, added, updated, problems = catalog.import_csv(self.csv, p, [self.songs], lambda f: 200.0,
+                                                            get_edges=lambda f: (0.5, 1.0), log=lambda m: None)
+        self.assertEqual((added, updated), (2, 1))
+        self.assertEqual(len(problems), 3)
+        self.assertIn("Line 6", problems[0])
+        self.assertIn("summer", problems[1])
+        self.assertIn("maybe", problems[2])
+        joy = os.path.join(self.songs, "Christmas", "Joy.mp3")
+        self.assertEqual(rows[full]["title"], "A Mighty Fortress")
+        self.assertEqual(rows[full]["duration"], "200.0")
+        self.assertEqual(rows[full]["start_silence"], "0.50")
+        self.assertEqual(rows[joy]["seasons"], "christmas")  # guessed from the folder name
+        old = rows[os.path.join(self.songs, "Old.mp3")]
+        self.assertEqual((old["title"], old["seasons"], old["enabled"], old["duration"]),
+                         ("Old Title", "easter", "no", "100"))
+        self.assertEqual(catalog.load(self.csv)[joy]["title"], "Joy to the World")  # saved
+
+    def test_excel_windows_encoding_and_no_file_column(self):
+        p = self.write("file,title\nHymn.mp3,Café Hymn\n", encoding="cp1252")
+        rows, added, _u, problems = catalog.import_csv(self.csv, p, [self.songs], lambda f: 1.0, log=lambda m: None)
+        self.assertEqual((added, problems), (1, []))
+        self.assertEqual(rows[os.path.join(self.songs, "Hymn.mp3")]["title"], "Café Hymn")
+        with self.assertRaises(ValueError):
+            catalog.import_csv(self.csv, self.write("title\nX\n"), [self.songs], lambda f: 1.0)
+
+
+def _item(label, desc="Christian hymn", published=None, written=None, classes=("musical work/composition",),
+          aliases=(), statuses=(), creators_died=None, translators=(), translators_died=None):
+    return {"id": "Q1", "label": label, "desc": desc, "aliases": list(aliases), "classes": list(classes),
+            "published": published, "written": written, "statuses": set(statuses),
+            "creators_died": creators_died, "translators": list(translators), "translators_died": translators_died}
+
+
+class PublicDomain(unittest.TestCase):
+    TODAY = D(2026, 11, 11)
+
+    def setUp(self):
+        import pdlookup
+        self.pd = pdlookup
+
+    def test_cutoff_moves_each_january(self):
+        self.assertEqual(self.pd.cutoff_year(D(2026, 11, 11)), 1930)
+        self.assertEqual(self.pd.cutoff_year(D(2027, 1, 1)), 1931)
+
+    def test_titles(self):
+        self.assertEqual(self.pd.norm("Holy, Holy, Holy!"), "holy holy holy")
+        self.assertEqual(self.pd.norm("Faith & Hope"), "faith and hope")
+        self.assertEqual(self.pd.short_title("03 - Amazing Grace (Live)"), "Amazing Grace")
+        self.assertEqual(self.pd.short_title("Amazing Grace [My Chains Are Gone]"), "Amazing Grace")
+        self.assertEqual(self.pd.short_title("Amazing Grace"), "")
+
+    def judge(self, title, items):
+        return self.pd.judge(title, items, self.TODAY)
+
+    def test_old_hymn_is_public_domain(self):
+        r = self.judge("Amazing Grace", [
+            _item("Amazing Grace", written=1772, published=1779),
+            _item("Amazing Grace", desc="vocal track by Judy Collins; 1970 studio recording", classes=["music track"]),
+            _item("Amazing Grace", desc="2020 song by DaBaby", published=2020),   # not a hymn: left out
+            _item("Amazing Grace", desc="2006 film by Michael Apted", published=2006, classes=["film"]),
+        ])
+        self.assertEqual(r["status"], "yes")
+        self.assertIn("published 1779", r["note"])
+
+    def test_new_song_is_under_copyright(self):
+        r = self.judge("In Christ Alone", [
+            _item("In Christ Alone", desc="Christian song written by Keith Getty and Stuart Townend", published=2001),
+            _item("In Christ Alone", desc="Christian hymn text", classes=["lyrics"]),
+        ])
+        self.assertEqual(r["status"], "no")
+        self.assertIn("2001", r["note"])
+
+    def test_newer_english_version_needs_checking(self):
+        r = self.judge("How Great Thou Art", [
+            _item("How Great Thou Art", published=1885, aliases=["O store Gud"], creators_died=1940),
+            _item("How Great Thou Art", desc="1967 studio album by Elvis Presley", published=1966, classes=["album"]),
+            _item("How Great Thou Art", desc="translated Christian hymn; English language version",
+                  classes=["translated song"]),
+            _item("How Great Thou Art", desc="Swedish folk melody as adapted by Stuart K. Hine", published=1949),
+        ])
+        self.assertEqual(r["status"], "check")
+
+    def test_old_translation_by_a_translator_long_dead(self):
+        r = self.judge("Silent Night", [
+            _item("Silent Night", desc='translated song; English version of "Stille Nacht"', creators_died=1863,
+                  translators=["John Freeman Young"], translators_died=1885),
+            _item("Silent Night", desc="vocal track by Rod Stewart; 2012 studio recording", classes=["track"]),
+            _item("Stille Nacht Heilige Nacht", desc="Christmas carol", aliases=["Silent Night"], published=1815),
+        ])
+        self.assertEqual(r["status"], "yes")
+        self.assertIn("translator died 1885", r["note"])
+
+    def test_marked_and_unknown(self):
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", statuses=["Q19652"])])["status"], "yes")
+        # An undated translation that is marked public domain is no reason to check.
+        self.assertEqual(self.judge("Old Hymn", [
+            _item("Old Hymn", published=1529),
+            _item("Old Hymn", classes=["edition of a translation"], statuses=["Q19652"])])["status"], "yes")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", statuses=["Q50423863"])])["status"], "no")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn")])["status"], "unknown")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", creators_died=1850)])["status"], "yes")
+        self.assertIsNone(self.judge("Old Hymn", [_item("Other Hymn", published=1800)]))
+        self.assertIsNone(self.judge("Old Hymn", []))
+        # Written after the cutoff: it cannot have been published before it.
+        self.assertEqual(self.judge("New", [_item("New", written=1990)])["status"], "no")
+
+    def test_lookup_order_and_fallbacks(self):
+        old = lambda t, today=None: {"status": "yes", "note": "Public domain (published 1779).", "source": "x"} \
+            if t == "Amazing Grace" else None
+        r = self.pd.lookup("Amazing Grace (My Chains Are Gone)", sources=[old], today=self.TODAY)
+        self.assertEqual(r["status"], "check")  # matched only without the part in brackets
+        self.assertEqual(self.pd.lookup("Amazing Grace", sources=[old])["status"], "yes")
+        self.assertEqual(self.pd.lookup("Nothing", sources=[old])["status"], "unknown")
+        self.assertEqual(self.pd.lookup("  ", sources=[old])["status"], "unknown")
+
+        def offline(t, today=None):
+            raise self.pd.LookupError_("Could not reach Wikidata")
+        hymns = [{"title": "Abide with Me", "lines": [["abide"]]}, {"title": "New Song", "lines": []}]
+        self.assertEqual(self.pd.lookup("Abide With Me", hymns, sources=[offline])["status"], "yes")
+        # Listed by title only: the app's list has it as still under copyright.
+        self.assertEqual(self.pd.lookup("New Song", hymns, sources=[offline])["status"], "check")
+        with self.assertRaises(self.pd.LookupError_):  # offline and not in the hymn list: tell the person
+            self.pd.lookup("Unknown Song", hymns, sources=[offline])
+        # Online: a "?" from Wikidata is answered by the hymn list, and a title-only entry turns Yes into Check.
+        unknown = lambda t, today=None: {"status": "unknown", "note": "No date.", "source": "Wikidata"}
+        self.assertEqual(self.pd.lookup("Abide with Me", hymns, sources=[unknown])["status"], "yes")
+        self.assertEqual(self.pd.lookup("New Song", hymns, sources=[lambda t, today=None: {
+            "status": "yes", "note": "Public domain (published 1812).", "source": "Wikidata"}])["status"], "check")
+
+    def test_real_wikidata_answers(self):
+        """Answers saved from Wikidata in November 2026, judged as on 11 November 2026."""
+        with open(os.path.join(os.path.dirname(__file__), "wikidata_answers.json"), encoding="utf-8") as fh:
+            answers = json.load(fh)
+        want = {
+            "Amazing Grace": "yes", "A Mighty Fortress Is Our God": "yes", "Silent Night": "yes",
+            "Holy, Holy, Holy": "yes", "Great Is Thy Faithfulness": "yes", "Lift High the Cross": "yes",
+            "Joy to the World": "yes",            # not the 1970 Hoyt Axton song of the same name
+            "O Come O Come Emmanuel": "yes", "Abide with Me": "yes", "It Is Well with My Soul": "yes",
+            "How Great Thou Art": "check",        # 1885 Swedish original, English version later
+            "Prepare the Royal Highway": "check",  # matched only the 1812 Swedish original
+            "In Christ Alone": "no", "Shout to the Lord": "no", "Here I Am to Worship": "no",
+            "Be Thou My Vision": "unknown", "10,000 Reasons": None, "Track 03": None,
+        }
+        for title, status in want.items():
+            r = self.judge(title, self.pd.parse(answers[title]))
+            self.assertEqual(r and r["status"], status, title)
+
+    def test_parse_and_query_text(self):
+        data = {"results": {"bindings": [{
+            "item": {"value": "http://www.wikidata.org/entity/Q210211"}, "label": {"value": "Amazing Grace"},
+            "desc": {"value": "Christian hymn"}, "aliases": {"value": ""}, "classes": {"value": "musical work/composition"},
+            "published": {"value": "1779-01-01T00:00:00Z"}, "created": {"value": "1772-01-01T00:00:00Z"},
+            "statuses": {"value": "http://www.wikidata.org/entity/Q19652"}, "creatorsDied": {"value": "1807-12-21T00:00:00Z"},
+        }]}}
+        item = self.pd.parse(data)[0]
+        self.assertEqual((item["id"], item["published"], item["written"], item["creators_died"]),
+                         ("Q210211", 1779, 1772, 1807))
+        self.assertEqual(item["statuses"], {"Q19652"})
+        with mock.patch.object(self.pd, "_get", return_value={"results": {"bindings": []}}) as get:
+            self.pd.wikidata_items('Say "Amen"\\ now')
+        url = get.call_args[0][0]
+        self.assertIn("query.wikidata.org/sparql", url)
+        self.assertNotIn("%22Amen%22", url)  # quotes taken out of the title: no broken query

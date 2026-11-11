@@ -25,7 +25,8 @@ and the app makes one ready-to-air MP3:
   steady between the organ, the sermon and the songs.
 
 Everything runs **on your own PC**. The speech recognition is downloaded once and then works
-offline; nothing about your services or songs is sent anywhere.
+offline; nothing about your services is sent anywhere. The only thing that ever leaves the PC is a
+song's title, and only when you click **Public domain...** to look songs up.
 
 ChurchRadio Studio was created by **Aaron Steger** for **Bethany Lutheran Church** in
 Fredericksburg, Texas, and its weekly radio broadcast, and is shared so other congregations
@@ -94,9 +95,10 @@ later with the **Settings...** button.
    minutes to find the end, then joining and compressing.
 4. The MP3 is saved, and the app tells you where.
 
-**The service date** sets the church season. It is read from the file name — `10.11.2026`,
-`10-11-2026` (month first) or `2026-10-11` — or you can type it in the window (MM/DD/YYYY). With no
-date, the app asks before using today's date.
+**The service date** sets the church season. The window shows the coming Sunday (or today, on a
+Sunday). Click the date to pick another one from a calendar. If you don't pick one and the file name
+holds a date — `10.11.2026`, `10-11-2026` (month first) or `2026-10-11` — that date is used and shown
+in the window; a date you picked in the calendar always wins.
 
 **Options in the window:**
 - **Service start** — **Auto** (cut the organ prelude, keep a choir anthem), **Organ start** (always
@@ -147,7 +149,8 @@ words were heard in it.
   (any time of the year). Holy Week also uses Lent songs. **Patriotic** songs play only on the
   weekend nearest a national holiday you chose, and then they come first.
 - **Play** — opens the song in your music player.
-- **Find** / **Show** — search by name, or show only songs that are on, off, or have no words.
+- **Find** / **Show** — search by name, or show only songs that are on, off, have no words, are in the
+  public domain or not, or haven't been looked up yet.
 - **Look for new songs** — scan your song folders again.
 
 Every change is saved at once.
@@ -167,8 +170,46 @@ A table shows each suggestion, how it was found, and the words that were heard. 
 in orange. Correct anything, untick songs you don't want, choose the folder to put them in, and click
 **Add**: the files are copied there, measured, and added to your list.
 
+### Import a song list
+
+**Songs... → Import list...** adds many songs at once, or changes the titles, seasons and on/off of
+songs already in your list, from a CSV file. Click **Download template...** to save a starting file,
+fill it in Excel (keep it as CSV), then click **Import a file...**. Columns:
+
+- `file` — the song's full path, or just its file name if it is in one of your song folders;
+- `title` — the song name;
+- `seasons` — the [season words](#teach-it-your-own-songs) separated by `;` (`Holy Week` and
+  `General` also work); empty or `general` = any time of the year;
+- `enabled` — `yes` or `no`.
+
+For a song already in your list, an empty cell keeps what is there now. A new song with no seasons
+gets them guessed from its file and folder name. The song files are not copied: they stay where they
+are. Lines that can't be used (a file that isn't found, an unknown season) are skipped, and the app
+lists them.
+
 **Identify...** does the same for songs already in your list — select some, or select none to do every
 song that has no title yet.
+
+### Public domain
+
+**Songs... → Public domain...** looks up each song's title on [Wikidata](https://www.wikidata.org)
+(free, open data) and fills the **Public domain** column. Select songs to look up just those; with
+none selected, every song not looked up yet is done. It needs the internet and takes a second or two
+per song; click **Stop** to stop (the songs already done are kept).
+
+- **Yes** — public domain in the US: published before 1931 (the year moves on each January).
+- **No** — under copyright.
+- **Check** — the original is old, but a newer version may be the one sung — for example "How Great
+  Thou Art", whose Swedish original is from 1885 but whose English version is from 1949. Also shown
+  when only the original in another language was found, when only part of a title matched (e.g.
+  "Amazing Grace (My Chains Are Gone)"), or when the dates on Wikidata don't agree.
+- **?** — not found, or no dates to go on.
+
+Click a song to see why underneath the list. Offline, songs in the app's own hymn list are still
+marked (it holds lyrics only for public-domain hymns).
+
+This is a guide, not legal advice. It judges the **song** (words and tune), not the **recording**:
+a modern recording or arrangement of an old hymn is still protected.
 
 ### Songs with no words
 
@@ -235,7 +276,8 @@ Most settings are in **Settings...**. All of them are in `config.json` in your
 
 **Song list (`songs.csv`).** The Songs window edits it, but you can also open it in Excel. Columns:
 `file`, `title`, `duration`, `seasons`, `enabled` (`yes`/`no`), `words` (words heard; empty = not
-checked yet), `start_silence` / `end_silence` (seconds; empty = not measured yet). If a song folder
+checked yet), `start_silence` / `end_silence` (seconds; empty = not measured yet), `public_domain`
+(`yes`/`no`/`check`/`unknown`; empty = not looked up yet) and `pd_note` (why). If a song folder
 can't be found (moved, or a drive not plugged in), its songs stay in the list with your edits.
 
 ## Where your files are
@@ -315,6 +357,7 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | File | What it is |
 |---|---|
 | `app.py` | The main window. |
+| `datepicker.py` | The service date box and its pop-out calendar. |
 | `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
 | `songs_window.py` | The Songs window. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
@@ -322,10 +365,11 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | `prelude.py` | Speech recognition: finding the start and end of the service. |
 | `audio.py` | ffmpeg: lengths, silence, trimming, joining, compression. |
 | `picker.py` | Picks the songs that fill the time. |
-| `catalog.py` | The song list (`songs.csv`), seasons, songs with no words. |
+| `catalog.py` | The song list (`songs.csv`), seasons, songs with no words, importing a song list. |
+| `pdlookup.py` | The public-domain lookup (Wikidata, then the app's hymn list). |
 | `identify.py` | Finds a song's title and seasons from tags, lyrics or file name. |
 | `hymns.csv` | The hymn list used to recognise songs. |
-| `churchyear.py` | The church year and patriotic holiday weekends. |
+| `churchyear.py` | The church year, patriotic holiday weekends, the default service date. |
 | `paths.py` | Where the program, its defaults and the user's files are. |
 | `config.json` | Default settings (copied to the user's folder on first start). |
 | `assets/` | The icon (`icon.svg` is the source; `icon.ico` and `icon-256.png` are made from it). |

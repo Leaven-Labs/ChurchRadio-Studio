@@ -24,6 +24,10 @@ try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 except ImportError:  # drag and drop not installed: Browse still works
     TkinterDnD = None
+try:
+    import sv_ttk
+except ImportError:  # modern look not installed: the system's own look is used
+    sv_ttk = None
 
 MEDIA = (("Service recordings", "*.mkv *.mp4 *.wav *.mp3 *.m4a"), ("All files", "*.*"))
 
@@ -85,9 +89,10 @@ class App:
         atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
         root.title(paths.APP_NAME)
         set_icon(root)
-        root.geometry("760x530")
+        root.geometry("780x620")
         self.drop = tk.Label(root, text="Drop the service recording here\n(MKV, MP4, WAV, MP3 or M4A)",
-                             relief="ridge", bd=3, height=5, font=("Segoe UI", 14), bg="#eef3fb")
+                             relief="flat", bd=0, height=5, font=("Segoe UI", 14), bg="#e8f0fc",
+                             fg="#1f4e9c", highlightthickness=1, highlightbackground="#a9c3ee")
         self.drop.pack(fill="x", padx=12, pady=(12, 6))
         row = ttk.Frame(root)
         row.pack(fill="x", padx=12)
@@ -128,7 +133,9 @@ class App:
                         variable=self.compress).pack(side="left", padx=(18, 0))
         self.status = ttk.Label(root, text="Ready.")
         self.status.pack(fill="x", padx=12, pady=4)
-        self.text = tk.Text(root, height=16, font=("Consolas", 9) if sys.platform == "win32" else "TkFixedFont")
+        self.text = tk.Text(root, height=16, font=("Consolas", 9) if sys.platform == "win32" else "TkFixedFont",
+                            relief="flat", bd=0, padx=8, pady=6, highlightthickness=1,
+                            highlightbackground="#d0d0d0", highlightcolor="#d0d0d0")
         self.text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         if TkinterDnD:
             self.drop.drop_target_register(DND_FILES)
@@ -309,7 +316,15 @@ def make_root():
         except (RuntimeError, tk.TclError):  # tkdnd not built for this system: Browse still works
             TkinterDnD = None
     root = root or tk.Tk()
-    if sys.platform.startswith("linux"):  # Tk's plain "default" look is dated; Windows and macOS keep theirs
+    themed = False
+    if sv_ttk:
+        try:
+            sv_ttk.set_theme("light", root)  # the Sun Valley look (like Windows 11) on every system
+            root.update()  # let the theme set its colours now, not over the widgets made next
+            themed = True
+        except tk.TclError:
+            pass
+    if not themed and sys.platform.startswith("linux"):  # Tk's plain "default" look is dated
         style = ttk.Style(root)
         if "clam" in style.theme_names():
             style.theme_use("clam")

@@ -29,6 +29,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 
 # tkinterdnd2 platform data (Tk extension: .tcl files + platform lib/dll).
 tkinterdnd2_data = collect_data_files("tkinterdnd2")
+# sv-ttk (the app's look): its Tcl theme files and widget pictures.
+sv_ttk_data = collect_data_files("sv_ttk")
 # faster-whisper ships ctranslate2 binaries and assets; collect their data files.
 faster_whisper_data = collect_data_files("faster_whisper")
 # ctranslate2 native libraries (the actual inference engine).
@@ -58,7 +60,7 @@ if os.path.exists("version.txt"):
 app_defaults += [("assets/icon.ico", "assets"), ("assets/icon-256.png", "assets")]
 
 datas = []
-for d in (tkinterdnd2_data, faster_whisper_data, tokenizers_data, huggingface_data):
+for d in (tkinterdnd2_data, sv_ttk_data, faster_whisper_data, tokenizers_data, huggingface_data):
     datas.extend(d)
 datas.extend(app_defaults)
 

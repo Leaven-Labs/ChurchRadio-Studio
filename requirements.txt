@@ -1,3 +1,4 @@
 tkinterdnd2
 numpy
 faster-whisper
+sv-ttk

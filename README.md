@@ -211,16 +211,20 @@ A table shows each suggestion, how it was found and the words heard; unsure ones
 anything, untick songs you don't want, choose the folder for them, and click **Add**: the files are
 copied there and added to your list.
 
+The tick box **Also check whether each song is in the public domain** (on by default; needs the
+internet) runs the [public-domain lookup](#public-domain) on each song as it is identified, shows the
+answer in the table and saves it with the song. You can tick or untick it at any time: ticking it
+looks up the songs already done too.
+
 **Identify...** does the same for songs already in your list. Choose the songs: the ones you
 selected, every song without a title, or **all songs** (a bulk scan). Two options:
 
 - **Keep the titles and seasons songs already have** (on by default) — only songs with no title get a
   suggestion. The others are still listened to, and if their words sound like another hymn, the
   **Found by** column says so.
-- **Also check whether each song is in the public domain** — the [public-domain
-  lookup](#public-domain) runs with each song's title during the scan, and the answer is saved with
-  the song. If you rename a song in the table, it is looked up again. Offline, the scan carries on
-  without it.
+- **Also check whether each song is in the public domain** — the same tick box as in Add songs,
+  for one song or many. If you rename a song in the table, it is looked up again. Offline, the scan
+  carries on without it.
 
 Listening takes a few seconds per song, so a bulk scan of a large list can take a while.
 

@@ -385,7 +385,7 @@ class SongsWindow:
         if files:
             add_songs.SongReview(self.win, list(files), self.path, self.folders, mode="add",
                                  min_words=self.min_words, models_folder=self.models_folder,
-                                 get_edges=self.get_edges, on_done=self.after_review)
+                                 get_edges=self.get_edges, on_done=self.after_review, check_pd=True)
 
     def identify_selected(self):
         """Suggest titles and seasons for songs: the selected ones, those without a title, or all of

@@ -5,7 +5,8 @@ mode "add":      new files. They are copied into one of the song folders on Save
 mode "identify": songs already in the list (for example the ones with no title yet), or all of
                  them in one bulk scan. keep=True keeps the title and seasons a song already has.
 check_pd=True also looks up whether each song is in the public domain (pdlookup.py), with the
-title found, and saves the answer with the song.
+title found, and saves the answer with the song. A tick box in the window turns it on or off at
+any time; turned on, it also looks up the songs already done.
 For each song the app reads its tags, listens to the start of it, and matches the words against
 the hymn list (identify.py). It also measures the length, the silence at the start and end, and
 whether it has words: a song with no words is added turned off.
@@ -100,6 +101,9 @@ class SongReview:
             self.dest_box = ttk.Combobox(row, values=self.folders, textvariable=self.dest, width=70)
             self.dest_box.pack(side="left", padx=6)
             ttk.Button(row, text="Other folder...", command=self.pick_dest).pack(side="left")
+        self.pd_var = tk.BooleanVar(value=check_pd)
+        ttk.Checkbutton(w, text="Also check whether each song is in the public domain (needs the internet)",
+                        variable=self.pd_var, command=self.pd_toggled).pack(anchor="w", padx=10, pady=(0, 4))
 
         body = ttk.Frame(w)
         body.pack(fill="both", expand=True, padx=10, pady=4)
@@ -163,6 +167,23 @@ class SongReview:
             if self.check_pd and not self.pd_offline:
                 self.look_up(item, r["title"])
         self.q.put(("finished",))
+
+    def pd_toggled(self):
+        """The tick box: on looks up the songs already done (and the rest as they are done)."""
+        self.check_pd = self.pd_var.get()
+        if self.check_pd:
+            self.pd_offline = False  # try again: the internet may be back
+            todo = [(k, r["title"]) for k, r in self.result.items() if not r.get("pd")]
+            if todo:
+                threading.Thread(target=self.look_up_all, args=(todo,), daemon=True).start()
+        for k in self.result:
+            self.refresh(k)
+
+    def look_up_all(self, todo):
+        for item, title in todo:
+            if self.stop or not self.check_pd or self.pd_offline:
+                return
+            self.look_up(item, title)
 
     def look_up(self, item, title):
         """Public-domain lookup for one song (in the background). Offline: told once, then skipped."""

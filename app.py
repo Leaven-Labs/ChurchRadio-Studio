@@ -2,6 +2,7 @@
 
 With --build it makes the broadcast with no window instead (cli.py), for Task Scheduler."""
 import atexit
+import multiprocessing
 import os
 import queue
 import sys
@@ -64,10 +65,10 @@ def about(parent):
     btns.pack(pady=(0, 14))
 
     def licenses():
-        folder = os.path.join(paths.program_dir(), "licenses")
+        folder = os.path.join(paths.resources_dir(), "licenses")
         target = folder if os.path.isdir(folder) else os.path.join(paths.program_dir(), "LICENSE")
         try:
-            songs_window.play(target)  # opens the folder / file in Windows
+            songs_window.play(target)  # opens the folder / file in Explorer, Finder or the file manager
         except OSError as e:
             messagebox.showerror("About", str(e), parent=dlg)
 
@@ -109,8 +110,10 @@ class App:
         self.mode = tk.StringVar(value=mode if mode in prelude.MODES else prelude.MODES[0])
         ttk.Combobox(row2, values=prelude.MODES, state="readonly", width=12,
                      textvariable=self.mode).pack(side="left", padx=6)
-        self.start_hint = ttk.Label(row2)
-        self.start_hint.pack(side="left")
+        self.start_hint = ttk.Label(row2, justify="left")
+        self.start_hint.pack(side="left", fill="x", expand=True)
+        # Wrap to the room there is: a long opening phrase, or wider Mac/Linux fonts, never cut it off.
+        self.start_hint.bind("<Configure>", lambda e: self.start_hint.config(wraplength=max(120, e.width)))
         row3 = ttk.Frame(root)
         row3.pack(fill="x", padx=12, pady=(6, 0))
         self.cut_end = tk.BooleanVar(value=True)
@@ -125,7 +128,7 @@ class App:
                         variable=self.compress).pack(side="left", padx=(18, 0))
         self.status = ttk.Label(root, text="Ready.")
         self.status.pack(fill="x", padx=12, pady=4)
-        self.text = tk.Text(root, height=16, font=("Consolas", 9))
+        self.text = tk.Text(root, height=16, font=("Consolas", 9) if sys.platform == "win32" else "TkFixedFont")
         self.text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         if TkinterDnD:
             self.drop.drop_target_register(DND_FILES)
@@ -296,20 +299,43 @@ def _selftest():
     sys.exit(0 if ok else 1)
 
 
+def make_root():
+    """The main window, with drag and drop if its Tk extension (tkdnd) loads on this system."""
+    global TkinterDnD
+    root = None
+    if TkinterDnD:
+        try:
+            root = TkinterDnD.Tk()
+        except (RuntimeError, tk.TclError):  # tkdnd not built for this system: Browse still works
+            TkinterDnD = None
+    root = root or tk.Tk()
+    if sys.platform.startswith("linux"):  # Tk's plain "default" look is dated; Windows and macOS keep theirs
+        style = ttk.Style(root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+    return root
+
+
 def main():
+    # Python starts helper processes by running this program again (on macOS, the "resource
+    # tracker" when the speech models are downloaded). In the packaged app, freeze_support() makes
+    # such a run do the helper's job and exit. Without it the helper opened a second app window,
+    # took its arguments for a recording to build, and hung.
+    multiprocessing.freeze_support()
     builder.ensure_user_files()
     if cli.build_args(sys.argv[1:]):  # --build: no window, for Task Scheduler
         sys.exit(cli.main(sys.argv[1:]))
     if "--selftest" in sys.argv:
         _selftest()
         return
-    root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
+    root = make_root()
     app = App(root)
     try:
         first_run = not builder.load_config().get("setup_done")
     except (OSError, ValueError):
         first_run = True
-    args = [a for a in sys.argv[1:] if a != "--selftest"]
+    # -psn_...: the process number older macOS passes to an app opened from the Finder.
+    args = [a for a in sys.argv[1:] if a != "--selftest" and not a.startswith("-psn_")]
     if first_run:
         root.after(200, lambda: app.settings(first_run=True))
     elif args:  # file dropped on the program icon

@@ -1,10 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for ChurchRadio Studio (one-folder, windowed app on Windows).
+# PyInstaller spec for ChurchRadio Studio (one-folder, windowed app).
 #
-# Built by .github/workflows/release.yml on windows-latest. Run:
+# Built by .github/workflows/release.yml on Windows, Linux and macOS. Run:
 #   pyinstaller ChurchRadio-Studio.spec
-# The result is dist\ChurchRadio-Studio\ (the .exe + an _internal folder). installer.iss
-# (Inno Setup) packs that folder and ffmpeg into one ChurchRadio-Studio-Setup.exe.
+# Windows: dist\ChurchRadio-Studio\ (the .exe + an _internal folder). installer.iss
+#   (Inno Setup) packs that folder and ffmpeg into one ChurchRadio-Studio-Setup.exe.
+# Linux:   dist/ChurchRadio-Studio/ (the program + _internal). The workflow adds ffmpeg and
+#   tools/linux/install.sh and packs it into ChurchRadio-Studio-Linux-x86_64.tar.gz.
+# macOS:   dist/ChurchRadio Studio.app as well. The workflow adds ffmpeg and the licenses to
+#   Contents/Resources, signs it ad hoc and packs it into ChurchRadio-Studio-macOS.dmg.
 # One folder instead of one file: it starts much faster (nothing is unpacked on each start)
 # and antivirus programs flag it less often.
 #
@@ -20,6 +24,7 @@
 #   {app}\ffmpeg (see release.yml). audio.find_tool() looks there first, then the app folder,
 #   PATH, and C:\ffmpeg\bin.
 import os
+import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 # tkinterdnd2 platform data (Tk extension: .tcl files + platform lib/dll).
@@ -94,7 +99,8 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,          # windowed, no console
-    icon="assets/icon.ico",
+    # Windows: the .ico. macOS: PyInstaller makes the .icns from the PNG (needs Pillow).
+    icon="assets/icon.ico" if sys.platform == "win32" else "assets/icon-256.png",
 )
 
 coll = COLLECT(
@@ -105,3 +111,21 @@ coll = COLLECT(
     upx=False,
     name="ChurchRadio-Studio",
 )
+
+if sys.platform == "darwin":
+    version = open("version.txt").read().strip() if os.path.exists("version.txt") else "0.0.0"
+    app = BUNDLE(
+        coll,
+        name="ChurchRadio Studio.app",
+        icon="assets/icon-256.png",
+        bundle_identifier="org.leavenlabs.churchradio-studio",
+        version=version,
+        info_plist={
+            "CFBundleName": "ChurchRadio Studio",
+            "CFBundleDisplayName": "ChurchRadio Studio",
+            "CFBundleShortVersionString": version,
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "14.0",  # onnxruntime and PyAV wheels need macOS 14
+            "NSHumanReadableCopyright": "Copyright (c) 2026 Aaron Steger. MIT License.",
+        },
+    )

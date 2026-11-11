@@ -6,8 +6,9 @@
 
 **Turn your Sunday service recording into a finished radio broadcast — in one drop.**
 
-ChurchRadio Studio is a free Windows app for churches that put their service on the radio (or a
-podcast or website). Drop the week's recording on the window and it makes one ready-to-air MP3:
+ChurchRadio Studio is a free app for churches that put their service on the radio (or a podcast or
+website), for **Windows, Mac and Linux**. Drop the week's recording on the window and it makes one
+ready-to-air MP3:
 
 **your intro → the service → songs that fill the rest of the hour**
 
@@ -21,7 +22,7 @@ podcast or website). Drop the week's recording on the window and it makes one re
   weekends. Songs used in recent weeks go last.
 - **Evens out the sound** with a broadcast compressor and limiter.
 
-Everything runs **on your own PC**. The speech recognition is downloaded once and then works
+Everything runs **on your own computer**. The speech recognition is downloaded once and then works
 offline. Nothing about your services leaves the PC; the only thing that ever does is a song's title,
 when you click **Check public domain...** to look songs up.
 
@@ -38,6 +39,7 @@ radio broadcast, and shared so other congregations can use it. Published by
 - [First start: the setup wizard](#first-start-the-setup-wizard)
 - [Making the broadcast each week](#making-the-broadcast-each-week)
 - [Making it automatically (Task Scheduler)](#making-it-automatically-task-scheduler)
+  - [On a Mac or Linux (launchd, cron)](#on-a-mac-or-linux-launchd-cron)
 - [How the cuts work](#how-the-cuts-work)
 - [Your songs](#your-songs)
 - [Settings](#settings)
@@ -53,16 +55,47 @@ radio broadcast, and shared so other congregations can use it. Published by
 
 ## Install
 
-You need a 64-bit Windows 10 or 11 PC — nothing else (ffmpeg is included).
+Nothing else is needed: ffmpeg is included. The first start needs **internet once** to download the
+speech models (about 620 MB); after that the app works offline. Download from the
+**[Releases](../../releases)** page:
 
-1. Download **`ChurchRadio-Studio-Setup.exe`** from the **[Releases](../../releases)** page.
-2. Run it. Choose **Install for me only** if you are not an administrator on the PC.
-3. **"Windows protected your PC"?** The installer isn't code-signed yet: click **More info** →
+| Your computer | Download |
+|---|---|
+| Windows 10 or 11 (64-bit) | `ChurchRadio-Studio-Setup.exe` |
+| Mac with Apple silicon (M1 or newer), macOS 14 (Sonoma) or newer | `ChurchRadio-Studio-macOS.dmg` |
+| Linux, 64-bit (Ubuntu 22.04 or newer, or another distribution of the same age) | `ChurchRadio-Studio-Linux-x86_64.tar.gz` |
+
+**Windows**
+
+1. Run `ChurchRadio-Studio-Setup.exe`. Choose **Install for me only** if you are not an administrator
+   on the PC.
+2. **"Windows protected your PC"?** The installer isn't code-signed yet: click **More info** →
    **Run anyway**.
 
 It adds the app to the Start menu (and the desktop, if you tick it) and an uninstaller under
-**Settings → Apps**. The first start needs **internet once** to download the speech models (about
-620 MB); after that the app works offline.
+**Settings → Apps**.
+
+**Mac**
+
+1. Open `ChurchRadio-Studio-macOS.dmg` and drag **ChurchRadio Studio** onto **Applications**.
+2. Open it from Applications. The app isn't signed with an Apple developer ID yet, so the first time
+   macOS says it *can't check it for malicious software*: click **Done**, open **System Settings →
+   Privacy & Security**, scroll down and click **Open Anyway** next to ChurchRadio Studio, then
+   confirm. After that it opens normally.
+
+Macs with an Intel processor aren't supported yet.
+
+**Linux**
+
+```bash
+tar -xzf ChurchRadio-Studio-Linux-x86_64.tar.gz
+ChurchRadio-Studio/install.sh
+```
+
+It installs for you only (no `sudo`): the program goes to `~/.local/share/churchradio-studio`, the
+app appears in your applications menu, and the command `~/.local/bin/churchradio-studio` starts it.
+`install.sh --uninstall` removes it again (your settings stay). You can also run
+`ChurchRadio-Studio/ChurchRadio-Studio` straight from the unpacked folder without installing.
 
 ## First start: the setup wizard
 
@@ -88,8 +121,9 @@ A short wizard sets the app up for your church. You can change everything later 
    the end, then joining and compressing.
 4. The app tells you where the MP3 was saved.
 
-To have Windows do this every week with no one at the PC, see
-[Making it automatically](#making-it-automatically-task-scheduler).
+To have the computer do this every week with no one at it, see
+[Making it automatically](#making-it-automatically-task-scheduler) (Windows) or
+[launchd and cron](#on-a-mac-or-linux-launchd-cron) (Mac, Linux).
 
 **The service date** sets the church season. The window shows the coming Sunday (today, on a
 Sunday); click it to pick another date from a calendar. If you don't, a date in the file name is
@@ -156,6 +190,44 @@ schtasks /Create /TN "ChurchRadio Studio broadcast" /SC WEEKLY /D SUN /ST 14:00 
 
 Test it with right-click → **Run**, then read the newest log. If you installed for yourself only, the
 program is in `%LOCALAPPDATA%\Programs\ChurchRadio Studio\`.
+
+### On a Mac or Linux (launchd, cron)
+
+The program and its `--build` options are the same; only the scheduler differs. Logs go to `logs/`
+in [your settings folder](#where-your-files-are).
+
+**Linux (cron).** Run `crontab -e` and add a line — here every Sunday at 2:00 PM:
+
+```
+0 14 * * 0  $HOME/.local/bin/churchradio-studio --build "$HOME/Videos/OBS"
+```
+
+**Mac (launchd).** Save this as `~/Library/LaunchAgents/org.leavenlabs.churchradio-studio.plist`
+(change the folder), then run `launchctl load ~/Library/LaunchAgents/org.leavenlabs.churchradio-studio.plist`.
+It runs every Sunday at 2:00 PM while you are logged in, or as soon as the Mac wakes if it was asleep:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.leavenlabs.churchradio-studio</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/ChurchRadio Studio.app/Contents/MacOS/ChurchRadio-Studio</string>
+    <string>--build</string>
+    <string>/Users/YOU/Movies/OBS</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+</dict>
+</plist>
+```
+
+If the recordings are in **Documents**, **Desktop**, **Downloads** or on an external drive, macOS may
+block the scheduled run from reading them: give ChurchRadio Studio access in **System Settings →
+Privacy & Security → Files and Folders** (or **Full Disk Access**), or keep the recordings in a
+folder such as `~/Movies`.
 
 ## How the cuts work
 
@@ -346,19 +418,28 @@ found (moved, or a drive not plugged in), its songs stay in the list with your e
 
 ## Where your files are
 
-| What | Where |
-|---|---|
-| The program (and ffmpeg) | `C:\Program Files\ChurchRadio Studio` (or `%LOCALAPPDATA%\Programs\ChurchRadio Studio` if installed for you only) |
-| Your settings, song list, history, `end_words.txt`, your `hymns.csv`, logs of scheduled runs (`logs\`) | `%APPDATA%\ChurchRadio Studio` |
-| The speech models (one copy per PC) | `C:\ProgramData\ChurchRadio Studio\models` |
+**Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`
+and the logs of scheduled runs (`logs`).
 
-To open your settings folder, paste `%APPDATA%\ChurchRadio Studio` into the File Explorer address bar.
-Uninstalling removes only the program; your settings and the models stay for a reinstall.
+| What | Windows | Mac | Linux |
+|---|---|---|---|
+| The program (and ffmpeg) | `C:\Program Files\ChurchRadio Studio` (or `%LOCALAPPDATA%\Programs\ChurchRadio Studio` if installed for you only) | `/Applications/ChurchRadio Studio.app` | `~/.local/share/churchradio-studio` |
+| Your settings folder | `%APPDATA%\ChurchRadio Studio` | `~/Library/Application Support/ChurchRadio Studio` | `~/.config/churchradio-studio` |
+| The speech models (one copy per computer on Windows and Mac) | `C:\ProgramData\ChurchRadio Studio\models` | `/Users/Shared/ChurchRadio Studio/models` | `~/.cache/churchradio-studio/models` |
+
+To open your settings folder on Windows, paste `%APPDATA%\ChurchRadio Studio` into the File Explorer
+address bar; on a Mac, in the Finder choose **Go → Go to Folder...** and paste
+`~/Library/Application Support/ChurchRadio Studio`. Uninstalling removes only the program; your
+settings and the models stay for a reinstall.
 
 ## Updating
 
-Run the newest `ChurchRadio-Studio-Setup.exe` from the **[Releases](../../releases)** page. It updates
-in place, keeps your settings, songs and history, and uses the speech models already on the PC.
+Download the newest version from the **[Releases](../../releases)** page. Your settings, songs,
+history and the speech models are kept.
+
+- **Windows:** run the new `ChurchRadio-Studio-Setup.exe`. It updates in place.
+- **Mac:** drag the new app from the `.dmg` onto **Applications** and choose **Replace**.
+- **Linux:** unpack the new `.tar.gz` and run its `install.sh` again.
 
 ## Troubleshooting
 
@@ -383,14 +464,20 @@ added. Trim it by hand, or raise the broadcast length.
 
 To check the set-up without making anything, run the task's command with `--dry-run` added.
 
-**The speech models won't download.** The first start needs internet once (about 620 MB). On a PC
-without internet, copy the `models` folder from another PC into `C:\ProgramData\ChurchRadio Studio\`,
-or set `models_folder` to a folder that holds them.
+**The speech models won't download.** The first start needs internet once (about 620 MB). On a
+computer without internet, copy the `models` folder from another one into the
+[models folder](#where-your-files-are), or set `models_folder` to a folder that holds them.
+
+**Mac: "ChurchRadio Studio is damaged and can't be opened."** The download was changed on the way.
+Download the `.dmg` again; if it still says so, run
+`xattr -dr com.apple.quarantine "/Applications/ChurchRadio Studio.app"` in Terminal.
 
 **Check the installation without opening the window:**
 
 ```
 "C:\Program Files\ChurchRadio Studio\ChurchRadio-Studio.exe" --selftest
+"/Applications/ChurchRadio Studio.app/Contents/MacOS/ChurchRadio-Studio" --selftest
+~/.local/bin/churchradio-studio --selftest
 ```
 
 It prints where the program, your files, ffmpeg and the models are, loads both models, and ends with
@@ -407,7 +494,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
-ffmpeg must be in an `ffmpeg` folder next to the code, on `PATH`, or in `C:\ffmpeg\bin`. Set
+ffmpeg must be in an `ffmpeg` folder next to the code, on `PATH`, or in `C:\ffmpeg\bin` (Windows),
+`/opt/homebrew/bin` or `/usr/local/bin` (Mac, e.g. `brew install ffmpeg`), `/usr/bin` (Linux). Set
 `CHURCHRADIO_DATA_DIR` to keep the settings in a test folder instead of your real one.
 
 **Run the tests**
@@ -416,12 +504,20 @@ ffmpeg must be in an `ffmpeg` folder next to the code, on `PATH`, or in `C:\ffmp
 python -m unittest discover -s tests
 ```
 
-**Build and release.** `.github/workflows/release.yml` runs on Windows for every pull request and
-release: the tests, the program folder (PyInstaller, `ChurchRadio-Studio.spec`), an LGPL ffmpeg
-build, and the installer (Inno Setup, `installer.iss`). It then installs it, self-tests it, makes a
-headless test broadcast, tests an update from the previous release, and uninstalls it. The installer
-is attached to the run. To publish, run the **Release** workflow from the Actions tab with a version
-such as `v1.0.0` (or push a tag `v…`).
+**Build and release.** `.github/workflows/release.yml` runs for every pull request and release, with
+one job per system. Each runs the tests, builds the program (PyInstaller, `ChurchRadio-Studio.spec`)
+with an LGPL ffmpeg, packs it, installs it as a user would, self-tests it and makes a headless test
+broadcast:
+
+- **Windows** — the installer (Inno Setup, `installer.iss`) with BtbN's LGPL ffmpeg; also tests an
+  update from the previous release, and uninstalls.
+- **Linux** (Ubuntu 22.04) — the `.tar.gz` with BtbN's LGPL ffmpeg and `tools/linux/install.sh`.
+- **macOS** (Apple silicon) — the `.app` in a `.dmg`, signed ad hoc. ffmpeg is built from source
+  (LGPL, with LAME for MP3) and cached.
+
+The downloads are attached to the run. To publish, run the **Release** workflow from the Actions tab
+with a version such as `v1.0.0` (or push a tag `v…`): once all three jobs pass, a last job makes the
+release with the three downloads and `SHA256SUMS.txt`.
 
 **Where things are**
 
@@ -448,19 +544,24 @@ such as `v1.0.0` (or push a tag `v…`).
 | `ChurchRadio-Studio.spec` | PyInstaller recipe. |
 | `installer.iss` | Inno Setup recipe for the installer. |
 | `ChurchRadio Studio.bat` | Starts the app from the source code on Windows. |
-| `tools/third_party_licenses.py` | Collects the third-party licenses for the installer. |
+| `tools/third_party_licenses.py` | Collects the third-party licenses for the downloads. |
+| `tools/linux/install.sh` | Installs the Linux download for the user (menu entry, command). |
+| `tools/smoke_test.sh` | The smoke test of the installed app on Linux and macOS (CI). |
+| `tools/check_ffmpeg.sh` | Checks an ffmpeg build is LGPL, writes MP3 and has the filters (CI). |
 | `LICENSE` | The MIT License. |
 | `tests/` | The tests (`test_core.py`) and saved Wikidata answers they use. |
 
 ## Third-party software
 
-The installer includes the software below. The full license texts are installed in the program's
+The downloads include the software below. The full license texts are installed in the program's
 `licenses` folder (**About → Licenses**), collected by `tools/third_party_licenses.py` at each build
 from what the program actually includes.
 
-- **[FFmpeg](https://ffmpeg.org)** — reading, trimming and encoding audio. An unchanged LGPL build
-  (from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)), with its license, in the
-  `ffmpeg` folder; the app runs it as a separate program.
+- **[FFmpeg](https://ffmpeg.org)** — reading, trimming and encoding audio. An unchanged LGPL build,
+  with its license, in the `ffmpeg` folder (in the Mac app: `Contents/Resources/ffmpeg`); the app runs
+  it as a separate program. Windows and Linux use the builds from
+  [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); the Mac build is made from the ffmpeg
+  sources with **[LAME](https://lame.sourceforge.io)** (LGPL) for MP3, by the release workflow.
 - **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (MIT) with
   **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** (MIT), and the **Whisper** speech models
   `base.en` and `small.en` (MIT), downloaded on first use.

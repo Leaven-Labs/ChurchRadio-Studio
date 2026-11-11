@@ -293,12 +293,17 @@ def fixed_models_dir():
     """The one model folder per PC, shared by every app version and copy of the .exe.
 
     On Windows: ``C:\\ProgramData\\ChurchRadio Studio\\models``.
-    Elsewhere: ``~/.cache/churchradio-studio/models``. Created on first use.
+    On a Mac: ``/Users/Shared/ChurchRadio Studio/models`` (every account on the Mac can use it).
+    On Linux: ``~/.cache/churchradio-studio/models`` ($XDG_CACHE_HOME if set). Created on first use.
     """
     from paths import APP_NAME, APP_SLUG
-    if platform.system() == "Windows":
+    system = platform.system()
+    if system == "Windows":
         return os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), APP_NAME, "models")
-    return os.path.join(os.path.expanduser("~"), ".cache", APP_SLUG, "models")
+    if system == "Darwin":
+        return os.path.join("/Users/Shared", APP_NAME, "models")
+    cache = (os.environ.get("XDG_CACHE_HOME") or "").strip() or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(cache, APP_SLUG, "models")
 
 
 def _app_base_dir():

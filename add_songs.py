@@ -193,7 +193,7 @@ class SongReview:
             if not self.pd_offline:
                 self.pd_offline = True
                 self.q.put(("note", f"{e}\n\nThe songs are still identified; look them up later with "
-                                    "Public domain... in the Songs window."))
+                                    "Check public domain... in the Songs window."))
 
     def poll(self):
         if not self.win.winfo_exists():

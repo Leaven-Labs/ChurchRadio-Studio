@@ -23,7 +23,7 @@ podcast or website). Drop the week's recording on the window and it makes one re
 
 Everything runs **on your own PC**. The speech recognition is downloaded once and then works
 offline. Nothing about your services leaves the PC; the only thing that ever does is a song's title,
-when you click **Public domain...** to look songs up.
+when you click **Check public domain...** to look songs up.
 
 Created by **Aaron Steger** for **Bethany Lutheran Church**, Fredericksburg, Texas, and its weekly
 radio broadcast, and shared so other congregations can use it. Published by
@@ -248,7 +248,7 @@ can't be used (file not found, unknown season) are skipped and listed.
 
 ### Public domain
 
-**Songs... → Public domain...** looks up each title on [Wikidata](https://www.wikidata.org) (free,
+**Songs... → Check public domain...** looks up each title on [Wikidata](https://www.wikidata.org) (free,
 open data) and fills the **Public domain** column — for the selected songs, or with none selected,
 every song not looked up yet. It needs the internet and takes a second or two per song; **Stop** keeps
 the songs already done.

@@ -182,7 +182,7 @@ class SongsWindow:
         self.rows = catalog.load(csv_path)
         self.win = w = tk.Toplevel(parent)
         w.title("Songs")
-        w.geometry("1010x580")
+        w.geometry("1100x580")
         w.transient(parent)
         w.grab_set()  # no build while songs are edited
 
@@ -203,8 +203,13 @@ class SongsWindow:
         self.import_btn = ttk.Button(top, text="Import list...", command=self.import_list)
         self.import_btn.pack(side="right")
 
-        ttk.Label(w, text="Click On to turn a song on or off. Double-click a title to rename it, "
-                          "or Seasons to choose when it plays.").pack(fill="x", padx=10)
+        hint = ttk.Frame(w)
+        hint.pack(fill="x", padx=10)
+        ttk.Label(hint, text="Click On to turn a song on or off. Double-click a title to rename it, "
+                             "or Seasons to choose when it plays.").pack(side="left")
+        # The counts and progress, on this line: on the button row a long one pushed buttons off.
+        self.status = ttk.Label(hint, text="")
+        self.status.pack(side="right")
         body = ttk.Frame(w)
         body.pack(fill="both", expand=True, padx=10, pady=4)
         self.tree = ttk.Treeview(body, columns=[c[0] for c in COLUMNS], show="headings", selectmode="extended")
@@ -221,7 +226,7 @@ class SongsWindow:
         self.tree.bind("<space>", lambda e: self.set_on(None))
         self.tree.bind("<Return>", lambda e: self.play_selected())
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.show_note())
-        self.note = ttk.Label(w, foreground="#555555", wraplength=980, justify="left")
+        self.note = ttk.Label(w, foreground="#555555", wraplength=1070, justify="left")
         self.note.pack(fill="x", padx=10)
 
         bottom = ttk.Frame(w)
@@ -232,12 +237,10 @@ class SongsWindow:
         ttk.Button(bottom, text="Rename...", command=self.rename_selected).pack(side="left", padx=(12, 0))
         ttk.Button(bottom, text="Seasons...", command=self.seasons_selected).pack(side="left", padx=4)
         ttk.Button(bottom, text="Identify...", command=self.identify_selected).pack(side="left", padx=(12, 0))
-        self.pd_btn = ttk.Button(bottom, text="Public domain...", command=self.public_domain)
+        self.pd_btn = ttk.Button(bottom, text="Check public domain...", command=self.public_domain)
         self.pd_btn.pack(side="left", padx=4)
         ttk.Button(bottom, text="Permission...", command=self.permission_selected).pack(side="left")
         ttk.Button(bottom, text="Close", command=w.destroy).pack(side="right")
-        self.status = ttk.Label(bottom, text="")
-        self.status.pack(side="right", padx=12)
         self.pd_running = False
         w.bind("<Destroy>", lambda e: e.widget is w and setattr(self, "pd_running", False))
 
@@ -559,7 +562,7 @@ class SongsWindow:
                         self.show_note()
                 else:
                     self.pd_running = False
-                    self.pd_btn.config(text="Public domain...")
+                    self.pd_btn.config(text="Check public domain...")
                     self.pd_btn.state(["!disabled"])
                     self.fill()
                     if msg[0] == "error":

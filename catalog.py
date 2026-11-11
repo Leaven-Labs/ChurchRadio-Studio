@@ -7,6 +7,8 @@ Columns: file, title, duration, seasons, enabled, words
 - words: how many words the speech model heard in the song (empty = not checked yet).
 - start_silence / end_silence: seconds of silence at the start / end of the song. They are cut
   when the song is played, so there is no gap between songs (empty = not measured yet).
+- public_domain: yes / no / check / unknown from the public-domain lookup (pdlookup.py);
+  empty = not looked up yet. pd_note says why.
 New songs found in the song folders are added with a guessed season. The Songs window in
 the app edits this file too.
 
@@ -19,7 +21,8 @@ import os
 import churchyear
 
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
-FIELDS = ["file", "title", "duration", "seasons", "enabled", "words", "start_silence", "end_silence"]
+FIELDS = ["file", "title", "duration", "seasons", "enabled", "words", "start_silence", "end_silence",
+          "public_domain", "pd_note"]
 MIN_WORDS = 6  # a song with fewer words heard than this has no words (instrumental): turned off once
 OFF = ("no", "n", "0", "false")
 

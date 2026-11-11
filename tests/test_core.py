@@ -1046,3 +1046,117 @@ class ImportSongList(unittest.TestCase):
         self.assertEqual(rows[os.path.join(self.songs, "Hymn.mp3")]["title"], "Café Hymn")
         with self.assertRaises(ValueError):
             catalog.import_csv(self.csv, self.write("title\nX\n"), [self.songs], lambda f: 1.0)
+
+
+def _item(label, desc="Christian hymn", published=None, written=None, classes=("musical work/composition",),
+          aliases=(), statuses=(), creators_died=None, translators=(), translators_died=None):
+    return {"id": "Q1", "label": label, "desc": desc, "aliases": list(aliases), "classes": list(classes),
+            "published": published, "written": written, "statuses": set(statuses),
+            "creators_died": creators_died, "translators": list(translators), "translators_died": translators_died}
+
+
+class PublicDomain(unittest.TestCase):
+    TODAY = D(2026, 11, 11)
+
+    def setUp(self):
+        import pdlookup
+        self.pd = pdlookup
+
+    def test_cutoff_moves_each_january(self):
+        self.assertEqual(self.pd.cutoff_year(D(2026, 11, 11)), 1930)
+        self.assertEqual(self.pd.cutoff_year(D(2027, 1, 1)), 1931)
+
+    def test_titles(self):
+        self.assertEqual(self.pd.norm("Holy, Holy, Holy!"), "holy holy holy")
+        self.assertEqual(self.pd.norm("Faith & Hope"), "faith and hope")
+        self.assertEqual(self.pd.short_title("03 - Amazing Grace (Live)"), "Amazing Grace")
+        self.assertEqual(self.pd.short_title("Amazing Grace [My Chains Are Gone]"), "Amazing Grace")
+        self.assertEqual(self.pd.short_title("Amazing Grace"), "")
+
+    def judge(self, title, items):
+        return self.pd.judge(title, items, self.TODAY)
+
+    def test_old_hymn_is_public_domain(self):
+        r = self.judge("Amazing Grace", [
+            _item("Amazing Grace", written=1772, published=1779),
+            _item("Amazing Grace", desc="vocal track by Judy Collins; 1970 studio recording", classes=["music track"]),
+            _item("Amazing Grace", desc="2020 song by DaBaby", published=2020),   # not a hymn: left out
+            _item("Amazing Grace", desc="2006 film by Michael Apted", published=2006, classes=["film"]),
+        ])
+        self.assertEqual(r["status"], "yes")
+        self.assertIn("published 1779", r["note"])
+
+    def test_new_song_is_under_copyright(self):
+        r = self.judge("In Christ Alone", [
+            _item("In Christ Alone", desc="Christian song written by Keith Getty and Stuart Townend", published=2001),
+            _item("In Christ Alone", desc="Christian hymn text", classes=["lyrics"]),
+        ])
+        self.assertEqual(r["status"], "no")
+        self.assertIn("2001", r["note"])
+
+    def test_newer_english_version_needs_checking(self):
+        r = self.judge("How Great Thou Art", [
+            _item("How Great Thou Art", published=1885, aliases=["O store Gud"], creators_died=1940),
+            _item("How Great Thou Art", desc="1967 studio album by Elvis Presley", published=1966, classes=["album"]),
+            _item("How Great Thou Art", desc="translated Christian hymn; English language version",
+                  classes=["translated song"]),
+            _item("How Great Thou Art", desc="Swedish folk melody as adapted by Stuart K. Hine", published=1949),
+        ])
+        self.assertEqual(r["status"], "check")
+
+    def test_old_translation_by_a_translator_long_dead(self):
+        r = self.judge("Silent Night", [
+            _item("Silent Night", desc='translated song; English version of "Stille Nacht"', creators_died=1863,
+                  translators=["John Freeman Young"], translators_died=1885),
+            _item("Silent Night", desc="vocal track by Rod Stewart; 2012 studio recording", classes=["track"]),
+            _item("Stille Nacht Heilige Nacht", desc="Christmas carol", aliases=["Silent Night"], published=1815),
+        ])
+        self.assertEqual(r["status"], "yes")
+        self.assertIn("translator died 1885", r["note"])
+
+    def test_marked_and_unknown(self):
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", statuses=["Q19652"])])["status"], "yes")
+        # An undated translation that is marked public domain is no reason to check.
+        self.assertEqual(self.judge("Old Hymn", [
+            _item("Old Hymn", published=1529),
+            _item("Old Hymn", classes=["edition of a translation"], statuses=["Q19652"])])["status"], "yes")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", statuses=["Q50423863"])])["status"], "no")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn")])["status"], "unknown")
+        self.assertEqual(self.judge("Old Hymn", [_item("Old Hymn", creators_died=1850)])["status"], "yes")
+        self.assertIsNone(self.judge("Old Hymn", [_item("Other Hymn", published=1800)]))
+        self.assertIsNone(self.judge("Old Hymn", []))
+        # Written after the cutoff: it cannot have been published before it.
+        self.assertEqual(self.judge("New", [_item("New", written=1990)])["status"], "no")
+
+    def test_lookup_order_and_fallbacks(self):
+        old = lambda t, today=None: {"status": "yes", "note": "Public domain (published 1779).", "source": "x"} \
+            if t == "Amazing Grace" else None
+        r = self.pd.lookup("Amazing Grace (My Chains Are Gone)", sources=[old], today=self.TODAY)
+        self.assertEqual(r["status"], "check")  # matched only without the part in brackets
+        self.assertEqual(self.pd.lookup("Amazing Grace", sources=[old])["status"], "yes")
+        self.assertEqual(self.pd.lookup("Nothing", sources=[old])["status"], "unknown")
+        self.assertEqual(self.pd.lookup("  ", sources=[old])["status"], "unknown")
+
+        def offline(t, today=None):
+            raise self.pd.LookupError_("Could not reach Wikidata")
+        hymns = [{"title": "Abide with Me", "lines": [["abide"]]}, {"title": "New Song", "lines": []}]
+        self.assertEqual(self.pd.lookup("Abide With Me", hymns, sources=[offline])["status"], "yes")
+        with self.assertRaises(self.pd.LookupError_):  # offline and not in the hymn list: tell the person
+            self.pd.lookup("New Song", hymns, sources=[offline])
+
+    def test_parse_and_query_text(self):
+        data = {"results": {"bindings": [{
+            "item": {"value": "http://www.wikidata.org/entity/Q210211"}, "label": {"value": "Amazing Grace"},
+            "desc": {"value": "Christian hymn"}, "aliases": {"value": ""}, "classes": {"value": "musical work/composition"},
+            "published": {"value": "1779-01-01T00:00:00Z"}, "created": {"value": "1772-01-01T00:00:00Z"},
+            "statuses": {"value": "http://www.wikidata.org/entity/Q19652"}, "creatorsDied": {"value": "1807-12-21T00:00:00Z"},
+        }]}}
+        item = self.pd.parse(data)[0]
+        self.assertEqual((item["id"], item["published"], item["written"], item["creators_died"]),
+                         ("Q210211", 1779, 1772, 1807))
+        self.assertEqual(item["statuses"], {"Q19652"})
+        with mock.patch.object(self.pd, "_get", return_value={"results": {"bindings": []}}) as get:
+            self.pd.wikidata_items('Say "Amen"\\ now')
+        url = get.call_args[0][0]
+        self.assertIn("query.wikidata.org/sparql", url)
+        self.assertNotIn("%22Amen%22", url)  # quotes taken out of the title: no broken query

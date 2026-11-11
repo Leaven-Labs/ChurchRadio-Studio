@@ -25,7 +25,8 @@ and the app makes one ready-to-air MP3:
   steady between the organ, the sermon and the songs.
 
 Everything runs **on your own PC**. The speech recognition is downloaded once and then works
-offline; nothing about your services or songs is sent anywhere.
+offline; nothing about your services is sent anywhere. The only thing that ever leaves the PC is a
+song's title, and only when you click **Public domain...** to look songs up.
 
 ChurchRadio Studio was created by **Aaron Steger** for **Bethany Lutheran Church** in
 Fredericksburg, Texas, and its weekly radio broadcast, and is shared so other congregations
@@ -148,7 +149,8 @@ words were heard in it.
   (any time of the year). Holy Week also uses Lent songs. **Patriotic** songs play only on the
   weekend nearest a national holiday you chose, and then they come first.
 - **Play** — opens the song in your music player.
-- **Find** / **Show** — search by name, or show only songs that are on, off, or have no words.
+- **Find** / **Show** — search by name, or show only songs that are on, off, have no words, are in the
+  public domain or not, or haven't been looked up yet.
 - **Look for new songs** — scan your song folders again.
 
 Every change is saved at once.
@@ -187,6 +189,26 @@ lists them.
 
 **Identify...** does the same for songs already in your list — select some, or select none to do every
 song that has no title yet.
+
+### Public domain
+
+**Songs... → Public domain...** looks up each song's title on [Wikidata](https://www.wikidata.org)
+(free, open data) and fills the **Public domain** column. Select songs to look up just those; with
+none selected, every song not looked up yet is done. It needs the internet and takes a second or two
+per song; click **Stop** to stop (the songs already done are kept).
+
+- **Yes** — public domain in the US: published before 1931 (the year moves on each January).
+- **No** — under copyright.
+- **Check** — the original is old, but a newer version may be the one sung — for example "How Great
+  Thou Art", whose Swedish original is from 1885 but whose English version is from 1949. Also shown
+  when only part of a title matched (e.g. "Amazing Grace (My Chains Are Gone)").
+- **?** — not found, or no dates to go on.
+
+Click a song to see why underneath the list. Offline, songs in the app's own hymn list are still
+marked (it holds lyrics only for public-domain hymns).
+
+This is a guide, not legal advice. It judges the **song** (words and tune), not the **recording**:
+a modern recording or arrangement of an old hymn is still protected.
 
 ### Songs with no words
 
@@ -253,7 +275,8 @@ Most settings are in **Settings...**. All of them are in `config.json` in your
 
 **Song list (`songs.csv`).** The Songs window edits it, but you can also open it in Excel. Columns:
 `file`, `title`, `duration`, `seasons`, `enabled` (`yes`/`no`), `words` (words heard; empty = not
-checked yet), `start_silence` / `end_silence` (seconds; empty = not measured yet). If a song folder
+checked yet), `start_silence` / `end_silence` (seconds; empty = not measured yet), `public_domain`
+(`yes`/`no`/`check`/`unknown`; empty = not looked up yet) and `pd_note` (why). If a song folder
 can't be found (moved, or a drive not plugged in), its songs stay in the list with your edits.
 
 ## Where your files are
@@ -342,6 +365,7 @@ uninstalls it. The installer is attached to the run for testing. To publish a re
 | `audio.py` | ffmpeg: lengths, silence, trimming, joining, compression. |
 | `picker.py` | Picks the songs that fill the time. |
 | `catalog.py` | The song list (`songs.csv`), seasons, songs with no words, importing a song list. |
+| `pdlookup.py` | The public-domain lookup (Wikidata, then the app's hymn list). |
 | `identify.py` | Finds a song's title and seasons from tags, lyrics or file name. |
 | `hymns.csv` | The hymn list used to recognise songs. |
 | `churchyear.py` | The church year, patriotic holiday weekends, the default service date. |

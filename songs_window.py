@@ -3,22 +3,32 @@
 Every change is saved to songs.csv at once (the same file Excel opens).
 """
 import os
+import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import audio
 import catalog
 import churchyear
+import pdlookup
 
 SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epiphany", "lent": "Lent",
                  "holyweek": "Holy Week", "easter": "Easter", "pentecost": "Pentecost",
                  churchyear.PATRIOTIC: "Patriotic"}
-SHOW = ("All songs", "On", "Off", "No words")
-COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 300, "w"), ("seasons", "Seasons", 170, "w"),
-           ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("file", "File", 230, "w"))
+SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Not public domain", "Not looked up")
+COLUMNS = (("on", "On", 40, "center"), ("title", "Title", 280, "w"), ("seasons", "Seasons", 150, "w"),
+           ("length", "Length", 60, "e"), ("words", "Words", 55, "e"), ("pd", "Public domain", 105, "center"),
+           ("file", "File", 200, "w"))
+PD_ABOUT = ("The app looks up each song's title on Wikidata (free, open data) and says whether the song "
+            "(its words and tune) is in the public domain in the US: published before {first}.\n\n"
+            "Yes = public domain. No = under copyright. Check = the original is old, but a newer version "
+            "(for example an English translation) may be the one sung. ? = not found.\n\n"
+            "This is a guide, not legal advice. It is about the song, not the recording: a modern "
+            "recording or arrangement of an old hymn is still protected.")
 
 
 def title_of(row):
@@ -40,6 +50,11 @@ def matches(row, show, find, min_words=catalog.MIN_WORDS):
     if show == "On" and not catalog.is_on(row) or show == "Off" and catalog.is_on(row):
         return False
     if show == "No words" and not no_words(row, min_words):
+        return False
+    pd = (row.get("public_domain") or "").strip().lower()
+    if show == "Public domain" and pd != "yes" or show == "Not public domain" and pd not in ("no", "check"):
+        return False
+    if show == "Not looked up" and pd:
         return False
     find = find.strip().lower()
     return not find or find in title_of(row).lower() or find in os.path.basename(row["file"]).lower()
@@ -96,7 +111,7 @@ class SongsWindow:
         self.rows = catalog.load(csv_path)
         self.win = w = tk.Toplevel(parent)
         w.title("Songs")
-        w.geometry("900x560")
+        w.geometry("1010x580")
         w.transient(parent)
         w.grab_set()  # no build while songs are edited
 
@@ -108,7 +123,7 @@ class SongsWindow:
         ttk.Entry(top, textvariable=self.find, width=24).pack(side="left", padx=(4, 12))
         ttk.Label(top, text="Show:").pack(side="left")
         self.show = tk.StringVar(value=SHOW[0])
-        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=10, textvariable=self.show)
+        cb = ttk.Combobox(top, values=SHOW, state="readonly", width=17, textvariable=self.show)
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self.fill())
         self.find_btn = ttk.Button(top, text="Look for new songs", command=self.rescan)
@@ -134,6 +149,9 @@ class SongsWindow:
         self.tree.bind("<Double-1>", self.double_click)
         self.tree.bind("<space>", lambda e: self.set_on(None))
         self.tree.bind("<Return>", lambda e: self.play_selected())
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self.show_note())
+        self.note = ttk.Label(w, foreground="#555555", wraplength=980, justify="left")
+        self.note.pack(fill="x", padx=10)
 
         bottom = ttk.Frame(w)
         bottom.pack(fill="x", padx=10, pady=(4, 10))
@@ -143,9 +161,13 @@ class SongsWindow:
         ttk.Button(bottom, text="Rename...", command=self.rename_selected).pack(side="left", padx=(12, 0))
         ttk.Button(bottom, text="Seasons...", command=self.seasons_selected).pack(side="left", padx=4)
         ttk.Button(bottom, text="Identify...", command=self.identify_selected).pack(side="left", padx=(12, 0))
+        self.pd_btn = ttk.Button(bottom, text="Public domain...", command=self.public_domain)
+        self.pd_btn.pack(side="left", padx=4)
         ttk.Button(bottom, text="Close", command=w.destroy).pack(side="right")
         self.status = ttk.Label(bottom, text="")
         self.status.pack(side="right", padx=12)
+        self.pd_running = False
+        w.bind("<Destroy>", lambda e: e.widget is w and setattr(self, "pd_running", False))
 
         self.fill()
         if not self.rows:
@@ -171,8 +193,9 @@ class SongsWindow:
 
     def values(self, r):
         w = (r.get("words") or "").strip()
+        pd = pdlookup.STATUS_LABELS.get((r.get("public_domain") or "").strip().lower(), "")
         return ("✔" if catalog.is_on(r) else "", title_of(r), seasons_text(r),
-                audio.fmt(catalog._duration(r)), w if w else "-", os.path.basename(r["file"]))
+                audio.fmt(catalog._duration(r)), w if w else "-", pd, os.path.basename(r["file"]))
 
     def refresh(self, key):
         r = self.rows[key]
@@ -370,6 +393,80 @@ class SongsWindow:
         dlg.geometry(f"+{self.win.winfo_rootx() + (self.win.winfo_width() - dlg.winfo_width()) // 2}"
                      f"+{self.win.winfo_rooty() + (self.win.winfo_height() - dlg.winfo_height()) // 3}")
         dlg.grab_set()
+
+    def show_note(self):
+        """Under the list: why the selected song is (or is not) in the public domain."""
+        keys = self.selected()
+        r = self.rows.get(keys[0]) if len(keys) == 1 else None
+        note = (r.get("pd_note") or "").strip() if r else ""
+        self.note.config(text=f"Public domain: {note}" if note else "")
+
+    def public_domain(self):
+        """Look up whether the selected songs (or every song not looked up yet) are in the public domain."""
+        if self.pd_running:  # the button says Stop while it runs
+            self.pd_running = False
+            self.pd_btn.config(text="Stopping ...")
+            self.pd_btn.state(["disabled"])
+            return
+        keys = self.selected() or [k for k, r in self.rows.items() if not (r.get("public_domain") or "").strip()]
+        if not keys:
+            messagebox.showinfo("Public domain", "Every song has been looked up. Select songs to look them up "
+                                "again.", parent=self.win)
+            return
+        about = PD_ABOUT.format(first=pdlookup.cutoff_year() + 1)
+        if not messagebox.askokcancel("Public domain", f"Look up {len(keys)} song(s)? This needs the internet "
+                                      f"and takes a second or two per song.\n\n{about}", parent=self.win):
+            return
+        hymns = []
+        try:
+            import identify
+            import paths
+            hymns = identify.load_hymns(os.path.join(paths.bundled_dir(), "hymns.csv"))
+        except (OSError, ValueError):
+            pass
+        self.pd_running = True
+        self.pd_btn.config(text="Stop")
+        q = queue.Queue()
+
+        def work():
+            for i, k in enumerate(keys):
+                if not self.pd_running:
+                    break
+                q.put(("progress", i))
+                try:
+                    q.put(("done", k, pdlookup.lookup(title_of(self.rows[k]), hymns)))
+                except pdlookup.LookupError_ as e:
+                    q.put(("error", str(e)))
+                    return
+                time.sleep(pdlookup.PAUSE)
+            q.put(("finished",))
+
+        def poll():
+            if not self.win.winfo_exists():
+                return
+            while not q.empty():
+                msg = q.get()
+                if msg[0] == "progress":
+                    self.status.config(text=f"Looking up song {msg[1] + 1} of {len(keys)} ...")
+                elif msg[0] == "done":
+                    k, r = msg[1], msg[2]
+                    if k in self.rows:
+                        self.rows[k]["public_domain"], self.rows[k]["pd_note"] = r["status"], r["note"]
+                        self.save()
+                        self.refresh(k)
+                        self.show_note()
+                else:
+                    self.pd_running = False
+                    self.pd_btn.config(text="Public domain...")
+                    self.pd_btn.state(["!disabled"])
+                    self.fill()
+                    if msg[0] == "error":
+                        messagebox.showerror("Public domain", msg[1], parent=self.win)
+                    return
+            self.win.after(150, poll)
+
+        threading.Thread(target=work, daemon=True).start()
+        poll()
 
     def regrab(self):
         """Keep the main window blocked while Songs is open (a box closing frees it)."""

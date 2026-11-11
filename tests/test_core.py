@@ -1325,3 +1325,18 @@ class CommandLine(unittest.TestCase):
         left = sorted(os.listdir(folder))
         self.assertEqual(len(left), 30)
         self.assertEqual(left[0], "build 05.log")  # the oldest went
+
+
+class BundledHymnList(unittest.TestCase):
+    def test_lyrics_only_for_public_domain_hymns(self):
+        """The app's list doubles as the offline public-domain check: songs still under copyright
+        (or known by a newer, protected translation) must be listed by title only."""
+        import identify
+        import pdlookup
+        hymns = identify.load_hymns(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                 "hymns.csv"))
+        for title in ("Spirit of the Living God",            # (c) 1935, renewed 1963
+                      "Lord Keep Us Steadfast in Your Word",  # modern translation; "Thy" is the old one
+                      "Prepare the Royal Highway"):
+            self.assertEqual(pdlookup.hymn_list(title, hymns)["status"], "check", title)
+        self.assertEqual(pdlookup.hymn_list("Amazing Grace", hymns)["status"], "yes")

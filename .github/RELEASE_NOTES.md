@@ -10,14 +10,14 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.1.0
+## What's new in 1.1.1
 
-- **A new look.** Every window has been rebuilt: the main window, Songs, Add songs / Identify, and the setup wizard and Settings. The app does the same things in the same places, with the same button names.
-- **Light and dark.** The app follows your computer's light or dark setting. To choose yourself, open **Settings...** and set **The app's look**.
-- **You can see what it is doing.** While a broadcast is made, the window names the step (finding the start, finding the end, cutting silences, choosing the songs, writing the MP3) above the log, with a moving bar.
-- **Songs list.** Tick boxes turn songs on and off, the public-domain answer is a coloured label (green Yes or Allowed, amber Check, red No), and a title is renamed right in its cell.
-- **Service date.** The date box opens a standard month calendar. The "Next Sunday" and "Today" shortcuts of the old calendar are gone: the box already starts on the coming Sunday.
-- **Dropping a recording** works on the whole window, not only on the drop area.
+- **One window, with a menu at the left.** Broadcast, Songs, History and Settings are now pages of the main window. Songs and Settings no longer open as separate windows. (The setup wizard of the first start still does.)
+- **Broadcast page.** **Progress** ticks off each step and shows where the start and the end were cut and how much silence was taken out. **The hour** shows the intro, the service and the chosen songs as one bar, to scale, with the songs and their lengths. The log is under **Show the details**; it opens by itself if a broadcast fails.
+- **Songs page.** A switch turns a song on or off, a round button plays it, and the **May broadcast** column says **Public domain**, **Allowed**, **Needs permission**, **Check** or **Not found** (before: Yes, Allowed, No, Check, ?). Select a song to see its file, the words heard and the reason under the list, with **Rename**, **Seasons**, **Identify** and **Add permission**. A right-click on the list has every action. The **Words** and **File** columns are gone from the table.
+- **History page (new).** The broadcasts you made, with their songs: **Play** one or **Show in folder**.
+- **Settings page.** All settings on one page; click **Save** at the top.
+- Songs and Settings are shut while a broadcast is being made.
 
 Nothing changes in how the broadcast is made, in your settings and song list, or in `--build` for Task Scheduler, cron and launchd.
 

@@ -14,10 +14,11 @@ item. Remove it from this file once it is built.
 
 ## Release plan (decided November 2026)
 
-- **1.1.0: the windows are Qt (PySide6), on the same Python code.** Staged on the branch
-  `claude/vigilant-darwin-yyq45t`: not tagged or released yet. `ui.py` holds the look (light and
-  dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen, and the
-  release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
+- **1.1.0 (released): the windows are Qt (PySide6), on the same Python code.** `ui.py` holds the look
+  (light and dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen,
+  and the release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
+- **1.1.1: stage 1 of the new look (below).** `.github/RELEASE_NOTES.md` and the workflow's default
+  tag are set for it. To release: merge, then run the Release workflow (or push the tag `v1.1.1`).
 - **The new look (a mockup the maintainer gave, November 2026) is built in three stages.** Stage 1 is
   done: one window with a menu at the left (Broadcast, Songs, History, Settings), the Songs table with
   switches and coloured labels, "The hour" bar and the progress list (`builder.build(tell=...)` gives

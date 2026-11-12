@@ -4,10 +4,12 @@ theme in config.json: "auto" (follow the system), "light" or "dark".
 """
 import os
 
-from PySide6.QtCore import QDate, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter
-from PySide6.QtWidgets import (QApplication, QDateEdit, QFrame, QLabel, QMessageBox, QStyle,
-                               QStyledItemDelegate)
+from PySide6.QtCore import QDate, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPainterPath, QPen,
+                           QPolygonF)
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDateEdit, QFrame, QHBoxLayout,
+                               QLabel, QMessageBox, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate,
+                               QWidget)
 
 import paths
 from churchyear import default_service_date
@@ -15,14 +17,16 @@ from churchyear import default_service_date
 THEMES = ("auto", "light", "dark")
 THEME_LABELS = {"auto": "Same as the system", "light": "Light", "dark": "Dark"}
 
-LIGHT = dict(bg="#f6f7f9", card="#ffffff", text="#1c2330", sub="#667085", line="#e3e6eb", accent="#2f6fd0",
-             accent2="#255bb0", soft="#eaf1fc", softline="#9dbcf0", log="#fbfbfc", sel="#e4edfb", hover="#f0f2f5",
-             ok="#1a7f4b", okbg="#e3f5ea", warn="#9a5b00", warnbg="#fdf1dc", no="#b42318", nobg="#fde8e6",
-             off="#98a1b0", disabled="#b4bac4")
-DARK = dict(bg="#171a20", card="#20242c", text="#e8ebf0", sub="#98a1b0", line="#313742", accent="#5b93e8",
-            accent2="#4a80d4", soft="#1f2b40", softline="#3d5f99", log="#1b1e25", sel="#263650", hover="#2a2f39",
-            ok="#5fd093", okbg="#173524", warn="#f0b45a", warnbg="#3a2c12", no="#f58a80", nobg="#402019",
-            off="#6b7483", disabled="#565d6a")
+LIGHT = dict(bg="#f4f5f8", side="#ebedf2", card="#ffffff", text="#1c2330", sub="#667085", line="#e1e4ea",
+             accent="#2f6fd0", accent2="#255bb0", soft="#eaf1fc", softline="#9dbcf0", log="#fbfbfc", sel="#e4edfb",
+             hover="#eef0f4", ok="#1a7f4b", okbg="#e3f5ea", warn="#9a5b00", warnbg="#fdf1dc", no="#b42318",
+             nobg="#fde8e6", off="#98a1b0", disabled="#b4bac4", intro="#8b6fe0", song="#2aa98c", track="#cfd4dc",
+             knob="#ffffff")
+DARK = dict(bg="#14171c", side="#191c23", card="#1f232d", text="#e8ebf0", sub="#98a1b0", line="#2c323d",
+            accent="#5b93e8", accent2="#4a80d4", soft="#1a2434", softline="#3d5f99", log="#191c23", sel="#22304a",
+            hover="#272c37", ok="#5fd093", okbg="#173524", warn="#f0b45a", warnbg="#3a2c12", no="#f58a80",
+            nobg="#402019", off="#6b7483", disabled="#565d6a", intro="#a78bfa", song="#45c4a8", track="#3a414d",
+            knob="#aab2c0")
 
 colors = dict(LIGHT)  # the colours in use (changed in place by apply_theme)
 
@@ -36,17 +40,32 @@ def style_sheet(c):
 QWidget {{ font-size: 13px; color: {c['text']}; }}
 QMainWindow, QDialog, QWidget#root {{ background: {c['bg']}; }}
 QToolTip {{ background: {c['card']}; color: {c['text']}; border: 1px solid {c['line']}; }}
-QFrame#card {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 10px; }}
+QFrame#card {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 12px; }}
+QFrame#side {{ background: {c['side']}; border: none; border-right: 1px solid {c['line']}; }}
+QFrame#field {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px; }}
+QFrame#field QDateEdit, QFrame#field QComboBox {{ border: none; background: transparent; padding: 2px 2px;
+    font-weight: 600; }}
+QScrollArea, QWidget#scrollbody {{ background: transparent; border: none; }}
 QLabel {{ background: transparent; }}
 QLabel#title {{ font-size: 17px; font-weight: 600; }}
+QLabel#appname {{ font-size: 15px; font-weight: 700; }}
+QLabel#pagetitle {{ font-size: 22px; font-weight: 700; }}
+QLabel#big {{ font-size: 15px; font-weight: 600; }}
+QLabel#caps {{ font-size: 11px; font-weight: 700; color: {c['sub']}; }}
+QLabel#small {{ font-size: 12px; color: {c['sub']}; }}
+QLabel#pill {{ font-weight: 600; border-radius: 11px; padding: 3px 10px; }}
+QLabel#pill[kind="ok"] {{ background: {c['okbg']}; color: {c['ok']}; }}
+QLabel#pill[kind="warn"] {{ background: {c['warnbg']}; color: {c['warn']}; }}
+QLabel#pill[kind="no"] {{ background: {c['nobg']}; color: {c['no']}; }}
 QLabel#heading {{ font-size: 16px; font-weight: 600; }}
 QLabel#sub, QLabel#hint {{ color: {c['sub']}; }}
 QLabel#strong {{ font-weight: 600; }}
 QLabel#error {{ color: {c['no']}; }}
 QFrame#drop {{ background: {c['soft']}; border: 2px dashed {c['softline']}; border-radius: 12px; }}
+QFrame#drop[has="true"] {{ background: {c['card']}; border: 1px solid {c['line']}; }}
 QFrame#drop[over="true"] {{ border: 2px solid {c['accent']}; }}
 QLabel#dropbig {{ font-size: 18px; font-weight: 600; color: {c['accent']}; }}
-QPushButton {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 7px; padding: 6px 14px; }}
+QPushButton {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px; padding: 7px 16px; }}
 QPushButton:hover {{ background: {c['hover']}; }}
 QPushButton:pressed {{ background: {c['sel']}; }}
 QPushButton:focus {{ border-color: {c['softline']}; }}
@@ -56,8 +75,20 @@ QPushButton#primary:hover {{ background: {c['accent2']}; }}
 QPushButton#primary:disabled {{ background: {c['line']}; border-color: {c['line']}; color: {c['disabled']}; }}
 QPushButton#ghost {{ border: none; background: transparent; color: {c['sub']}; }}
 QPushButton#ghost:hover {{ color: {c['text']}; }}
+QFrame#segs {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px; }}
+QPushButton#seg {{ background: transparent; border: none; border-right: 1px solid {c['line']}; border-radius: 0;
+    padding: 7px 13px; color: {c['sub']}; }}
+QPushButton#seg:hover {{ color: {c['text']}; }}
+QPushButton#seg[pos="first"] {{ border-top-left-radius: 7px; border-bottom-left-radius: 7px; }}
+QPushButton#seg[pos="last"] {{ border-right: none; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }}
+QPushButton#seg:checked {{ background: {c['soft']}; color: {c['accent']}; font-weight: 600; }}
+QMenu {{ background: {c['card']}; border: 1px solid {c['line']}; padding: 4px; }}
+QMenu::item {{ padding: 6px 22px; border-radius: 4px; }}
+QMenu::item:selected {{ background: {c['sel']}; }}
+QMenu::item:disabled {{ color: {c['disabled']}; }}
+QMenu::separator {{ height: 1px; background: {c['line']}; margin: 4px 6px; }}
 QLineEdit, QComboBox, QDateEdit, QListWidget {{ background: {c['card']}; border: 1px solid {c['line']};
-    border-radius: 7px; padding: 5px 9px; selection-background-color: {c['accent']}; selection-color: white; }}
+    border-radius: 8px; padding: 6px 10px; selection-background-color: {c['accent']}; selection-color: white; }}
 QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{ border-color: {c['accent']}; }}
 QLineEdit:disabled, QComboBox:disabled {{ color: {c['disabled']}; }}
 QComboBox::drop-down, QDateEdit::drop-down {{ border: none; width: 24px; }}
@@ -78,13 +109,16 @@ QPlainTextEdit {{ background: {c['log']}; border: 1px solid {c['line']}; border-
     selection-background-color: {c['accent']}; selection-color: white; }}
 QProgressBar {{ background: {c['line']}; border: none; border-radius: 3px; max-height: 6px; min-height: 6px; }}
 QProgressBar::chunk {{ background: {c['accent']}; border-radius: 3px; }}
-QTableWidget {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px;
+QTableWidget {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 12px;
     selection-background-color: {c['sel']}; selection-color: {c['text']}; outline: 0; }}
-QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid {c['line']}; }}
+QTableWidget::item {{ padding: 4px 10px; border-bottom: 1px solid {c['line']}; }}
 QTableWidget::item:selected {{ background: {c['sel']}; color: {c['text']}; }}
 QTableWidget QLineEdit {{ border-radius: 0; padding: 0 6px; }}
 QHeaderView::section {{ background: {c['card']}; color: {c['sub']}; font-weight: 600; border: none;
-    border-bottom: 1px solid {c['line']}; padding: 7px 8px; }}
+    border-bottom: 1px solid {c['line']}; padding: 10px 10px; }}
+QHeaderView {{ background: transparent; }}
+QHeaderView::section:first {{ border-top-left-radius: 11px; }}
+QHeaderView::section:last, QHeaderView::section:only-one {{ border-top-right-radius: 11px; }}
 QTableCornerButton::section {{ background: {c['card']}; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 4px 2px; }}
 QScrollBar::handle:vertical {{ background: {c['softline']}; border-radius: 4px; min-height: 30px; }}
@@ -143,10 +177,14 @@ def fixed_font(size=9):
 
 
 def label(text="", kind="", wrap=False):
-    """A QLabel; kind is its style: title, heading, sub, hint, strong or error."""
+    """A QLabel; kind is its style: title, pagetitle, heading, big, caps, sub, small, hint, strong or error."""
     lab = QLabel(text)
     if kind:
         lab.setObjectName(kind)
+    if kind == "caps":
+        font = lab.font()
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 1.2)
+        lab.setFont(font)
     lab.setWordWrap(wrap)
     return lab
 
@@ -162,6 +200,276 @@ def ask(parent, title, text):
     return QMessageBox.question(parent, title, text) == QMessageBox.Yes
 
 
+def set_prop(widget, name, value):
+    """Set a property the style sheet looks at (QFrame#drop[over="true"]) and restyle the widget."""
+    widget.setProperty(name, value)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
+def field(text, widget):
+    """A small box with a grey label and a field in it: [Service date  Sun, Nov 15, 2026]."""
+    box = QFrame()
+    box.setObjectName("field")
+    row = QHBoxLayout(box)
+    row.setContentsMargins(12, 3, 6, 3)
+    row.setSpacing(4)
+    row.addWidget(label(text, "sub"))
+    row.addWidget(widget)
+    return box
+
+
+# ---- small drawings: no picture files, and they take the colours of the theme ---------------
+def draw_icon(p, name, rect, color):
+    """Draw the icon `name` in rect (a square): broadcast, songs, history, settings, file, play, check."""
+    p.save()
+    p.setRenderHint(QPainter.Antialiasing)
+    p.translate(rect.x(), rect.y())
+    p.scale(rect.width() / 20.0, rect.height() / 20.0)  # drawn on a 20 x 20 grid
+    color = QColor(color)
+    p.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+
+    def line(*xy):
+        p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in zip(xy[::2], xy[1::2])]))
+
+    if name == "broadcast":
+        for r in (4.6, 8.2):
+            box = QRectF(10 - r, 10 - r, 2 * r, 2 * r)
+            p.drawArc(box, -48 * 16, 96 * 16)
+            p.drawArc(box, 132 * 16, 96 * 16)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(10, 10), 1.5, 1.5)
+    elif name == "songs":
+        p.drawEllipse(QPointF(5.4, 15), 2.3, 2.3)
+        p.drawEllipse(QPointF(14.4, 13), 2.3, 2.3)
+        line(7.7, 15, 7.7, 5, 16.7, 3, 16.7, 13)
+    elif name == "history":
+        p.drawEllipse(QPointF(10, 10), 7.6, 7.6)
+        line(10, 5.6, 10, 10, 13, 12)
+    elif name == "settings":
+        for y, x in ((5, 13), (10, 7), (15, 12)):
+            line(3, y, 17, y)
+            p.setBrush(color)
+            p.drawEllipse(QPointF(x, y), 1.9, 1.9)
+    elif name == "file":
+        line(11.5, 2.5, 5, 2.5, 5, 17.5, 15.5, 17.5, 15.5, 6.5, 11.5, 2.5, 11.5, 6.5, 15.5, 6.5)
+    elif name == "play":
+        p.setBrush(color)
+        p.drawPolygon(QPolygonF([QPointF(7.6, 5.6), QPointF(15, 10), QPointF(7.6, 14.4)]))
+    elif name == "check":
+        line(5.6, 10.4, 8.8, 13.4, 14.6, 7)
+    p.restore()
+
+
+class IconTile(QWidget):
+    """An icon on a soft rounded square (the file in the recording card)."""
+
+    def __init__(self, name, size=44):
+        super().__init__()
+        self.name = name
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, _event):  # noqa: N802  (Qt's name)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(colors["soft"]))
+        p.drawRoundedRect(QRectF(self.rect()), 10, 10)
+        m = self.width() * 0.28
+        draw_icon(p, self.name, QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m), colors["accent"])
+
+
+class NavButton(QAbstractButton):
+    """A line of the menu at the left: an icon and a name. The page shown is the checked one."""
+
+    def __init__(self, icon, text):
+        super().__init__()
+        self.icon_name = icon
+        self.setText(text)
+        self.setCheckable(True)
+        self.setAutoExclusive(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(40)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def sizeHint(self):  # noqa: N802
+        return QSize(180, 40)
+
+    def enterEvent(self, event):  # noqa: N802
+        self.update()
+
+    def leaveEvent(self, event):  # noqa: N802
+        self.update()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        on = self.isChecked()
+        if on or (self.underMouse() and self.isEnabled()):
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(colors["card" if on else "hover"]))
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(0, 1, 0, -1), 9, 9)
+        color = colors["disabled"] if not self.isEnabled() else colors["text" if on else "sub"]
+        draw_icon(p, self.icon_name, QRectF(12, (self.height() - 18) / 2, 18, 18), color)
+        font = QFont(self.font())
+        font.setPixelSize(15)
+        font.setWeight(QFont.DemiBold if on else QFont.Normal)
+        p.setFont(font)
+        p.setPen(QColor(color))
+        p.drawText(self.rect().adjusted(42, 0, -6, 0), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+
+
+class Segments(QFrame):
+    """A row of joined buttons, one of them chosen: [All | Allowed to broadcast | Off]."""
+    changed = Signal(str)
+
+    def __init__(self, names):
+        super().__init__()
+        self.setObjectName("segs")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(1, 1, 1, 1)
+        row.setSpacing(0)
+        self.group, self.buttons = QButtonGroup(self), {}
+        for i, name in enumerate(names):
+            b = self.buttons[name] = QPushButton(name)
+            b.setObjectName("seg")
+            b.setProperty("pos", "first" if i == 0 else "last" if i == len(names) - 1 else "mid")
+            b.setCheckable(True)
+            b.setAutoDefault(False)
+            b.setChecked(i == 0)
+            b.clicked.connect(lambda _on=False, n=name: self.changed.emit(n))
+            self.group.addButton(b)
+            row.addWidget(b)
+
+    def current(self):
+        return next(name for name, b in self.buttons.items() if b.isChecked())
+
+    def set_current(self, name):
+        if name in self.buttons and name != self.current():
+            self.buttons[name].setChecked(True)
+            self.changed.emit(name)
+
+
+class HourBar(QWidget):
+    """The broadcast as one bar: the intro, the service and each song, to scale."""
+    COLORS = {"intro": "intro", "service": "accent", "song": "song"}
+
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.setFixedHeight(40)
+
+    def set_parts(self, parts):
+        """parts: [(kind, seconds, text drawn in the part if it fits)], kind: intro, service or song."""
+        self.parts = [p for p in parts if p[1] > 0]
+        self.update()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect())
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, 9, 9)
+        p.setClipPath(clip)
+        total = sum(sec for _kind, sec, _text in self.parts)
+        if not total:
+            p.fillRect(rect, QColor(colors["line"]))
+            return
+        p.fillRect(rect, QColor(colors["card"]))  # shows as the thin gaps between the parts
+        font = QFont(self.font())
+        font.setBold(True)
+        p.setFont(font)
+        gap, x = 2.0, 0.0
+        room = rect.width() - gap * (len(self.parts) - 1)
+        for kind, sec, text in self.parts:
+            w = room * sec / total
+            part = QRectF(x, 0, w, rect.height())
+            p.fillRect(part, QColor(colors[self.COLORS.get(kind, "accent")]))
+            if text and p.fontMetrics().horizontalAdvance(text) + 28 < w:
+                p.setPen(QColor("white"))
+                p.drawText(part.adjusted(14, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
+            x += w + gap
+
+
+class StepMark(QWidget):
+    """The mark before a step: an empty ring (todo), a turning ring (doing), a green tick (done)
+    or a red ring (failed)."""
+
+    def __init__(self):
+        super().__init__()
+        self.state, self.angle = "todo", 0
+        self.setFixedSize(22, 22)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.turn)
+
+    def turn(self):
+        self.angle = (self.angle + 24) % 360
+        self.update()
+
+    def set_state(self, state):
+        self.state = state
+        if state == "doing":
+            self.timer.start(60)
+        else:
+            self.timer.stop()
+        self.update()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        box = QRectF(2, 2, 18, 18)
+        if self.state == "done":
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(colors["ok"]))
+            p.drawEllipse(box)
+            draw_icon(p, "check", QRectF(3, 3, 16, 16), colors["card"])
+            return
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(colors["no" if self.state == "failed" else "line"]), 2))
+        p.drawEllipse(box)
+        if self.state == "doing":
+            p.setPen(QPen(QColor(colors["accent"]), 2, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(box, -self.angle * 16, 100 * 16)
+
+
+class StepRow(QWidget):
+    """One step of the build: its mark, what it is, and at the right what was found."""
+
+    def __init__(self, todo, doing, done):
+        super().__init__()
+        self.texts = {"todo": todo, "doing": doing, "done": done, "failed": todo}
+        self.state = "todo"
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 3, 0, 3)
+        row.setSpacing(10)
+        self.mark, self.text, self.value = StepMark(), label(todo), label("", "sub")
+        row.addWidget(self.mark)
+        row.addWidget(self.text, 1)
+        row.addWidget(self.value)
+
+    def set(self, state, value=None):
+        """state: todo, doing, done or failed. value: the text at the right (None keeps it)."""
+        self.state = state
+        self.mark.set_state(state)
+        self.text.setText(self.texts[state])
+        self.text.setObjectName("strong" if state == "doing" else "sub" if state == "todo" else "")
+        self.text.style().unpolish(self.text)
+        self.text.style().polish(self.text)
+        if value is not None:
+            self.value.setText(value)
+
+
+# ---- how the cells of the Songs table are drawn ---------------------------------------------
+def _row_background(delegate, painter, option, index):
+    """The cell's own background (the selected row's colour, the line under it), with no text."""
+    style = option.widget.style() if option.widget else QApplication.style()
+    blank = type(option)(option)
+    delegate.initStyleOption(blank, index)
+    blank.text = ""
+    style.drawControl(QStyle.CE_ItemViewItem, blank, painter, option.widget)
+
+
 class PillDelegate(QStyledItemDelegate):
     """Draws a table cell's text as a coloured label. The item's Qt.UserRole says which colours:
     "ok", "warn" or "no" (anything else: plain text)."""
@@ -171,24 +479,78 @@ class PillDelegate(QStyledItemDelegate):
         if not text or kind not in ("ok", "warn", "no"):
             super().paint(painter, option, index)
             return
-        style = option.widget.style() if option.widget else QApplication.style()
-        blank = type(option)(option)
-        self.initStyleOption(blank, index)
-        blank.text = ""
-        style.drawControl(QStyle.CE_ItemViewItem, blank, painter, option.widget)  # the row's background
+        _row_background(self, painter, option, index)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         font = QFont(option.font)
         font.setBold(True)
         painter.setFont(font)
-        w = painter.fontMetrics().horizontalAdvance(text) + 20
-        h = min(option.rect.height() - 10, 22)
-        rect = QRectF(option.rect.x() + 8, option.rect.center().y() - h / 2 + 1, w, h)
+        w = painter.fontMetrics().horizontalAdvance(text) + 22
+        h = min(option.rect.height() - 10, 24)
+        rect = QRectF(option.rect.x() + 10, option.rect.center().y() - h / 2 + 1, w, h)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(colors[kind + "bg"]))
         painter.drawRoundedRect(rect, h / 2, h / 2)
         painter.setPen(QColor(colors[kind]))
         painter.drawText(rect, Qt.AlignCenter, text)
+        painter.restore()
+
+
+class ChipDelegate(QStyledItemDelegate):
+    """Draws each part of the cell's text ("Lent, Easter") in a small outlined box."""
+
+    def paint(self, painter, option, index):
+        _row_background(self, painter, option, index)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setClipRect(option.rect)
+        brush = index.data(Qt.ForegroundRole)
+        dim = brush is not None and QColor(brush.color() if hasattr(brush, "color") else brush) == QColor(colors["off"])
+        x, h = option.rect.x() + 10.0, 24.0
+        for text in [t.strip() for t in (index.data(Qt.DisplayRole) or "").split(",") if t.strip()]:
+            w = painter.fontMetrics().horizontalAdvance(text) + 18
+            rect = QRectF(x, option.rect.center().y() - h / 2 + 1, w, h)
+            painter.setPen(QPen(QColor(colors["line"]), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect, 6, 6)
+            painter.setPen(QColor(colors["off" if dim else "sub"]))
+            painter.drawText(rect, Qt.AlignCenter, text)
+            x += w + 6
+        painter.restore()
+
+
+class SwitchDelegate(QStyledItemDelegate):
+    """Draws the cell as an on / off switch. The item's Qt.UserRole is True for on."""
+
+    def paint(self, painter, option, index):
+        _row_background(self, painter, option, index)
+        on = bool(index.data(Qt.UserRole))
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        w, h = 40.0, 22.0
+        rect = QRectF(option.rect.x() + 16, option.rect.center().y() - h / 2 + 1, w, h)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(colors["accent" if on else "track"]))
+        painter.drawRoundedRect(rect, h / 2, h / 2)
+        painter.setBrush(QColor("white" if on else colors["knob"]))
+        r = h / 2 - 3
+        painter.drawEllipse(QPointF(rect.right() - h / 2 if on else rect.left() + h / 2, rect.center().y()), r, r)
+        painter.restore()
+
+
+class PlayDelegate(QStyledItemDelegate):
+    """Draws a round play button in the cell."""
+
+    def paint(self, painter, option, index):
+        _row_background(self, painter, option, index)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        d = 28.0
+        circle = QRectF(option.rect.center().x() - d / 2 + 1, option.rect.center().y() - d / 2 + 1, d, d)
+        painter.setPen(QPen(QColor(colors["line"]), 1.2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(circle)
+        draw_icon(painter, "play", circle.adjusted(6, 6, -6, -6), colors["sub"])
         painter.restore()
 
 
@@ -200,7 +562,7 @@ class DateField(QDateEdit):
         super().__init__()
         self.changed = False
         self.setCalendarPopup(True)
-        self.setDisplayFormat("MM/dd/yyyy")
+        self.setDisplayFormat("ddd, MMM d, yyyy")
         self.calendarWidget().setFirstDayOfWeek(Qt.Sunday)
         self.calendarWidget().setGridVisible(False)
         self.set_date(date or default_service_date())

@@ -14,10 +14,19 @@ item. Remove it from this file once it is built.
 
 ## Release plan (decided November 2026)
 
-- **1.1.0: the windows are Qt (PySide6), on the same Python code.** Staged on the branch
-  `claude/vigilant-darwin-yyq45t`: not tagged or released yet. `ui.py` holds the look (light and
-  dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen, and the
-  release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
+- **1.1.0 (released): the windows are Qt (PySide6), on the same Python code.** `ui.py` holds the look
+  (light and dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen,
+  and the release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
+- **1.1.1: stage 1 of the new look (below).** `.github/RELEASE_NOTES.md` and the workflow's default
+  tag are set for it. To release: merge, then run the Release workflow (or push the tag `v1.1.1`).
+- **The new look (a mockup the maintainer gave, November 2026) is built in three stages.** Stage 1 is
+  done: one window with a menu at the left (Broadcast, Songs, History, Settings), the Songs table with
+  switches and coloured labels, "The hour" bar and the progress list (`builder.build(tell=...)` gives
+  the numbers). Still to do, only when asked: stage 2, a waveform that shows where the cuts are;
+  stage 3, dragging the cuts (needs `builder.build` split into analyse / review / write, with the
+  one-pass mode kept for `cli.py`), playing in the app ("Play from start cut", needs QtMultimedia =
+  PySide6-Addons, a bigger download, or clips through ffmpeg), and "about 1 min left" while the MP3 is
+  written. Stage 3 is also feature 2 below.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.

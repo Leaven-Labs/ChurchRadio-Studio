@@ -1,4 +1,4 @@
-"""Songs window: turn songs on or off, rename them, set their church seasons, play them.
+"""The Songs page: turn songs on or off, rename them, set their church seasons, play them.
 
 Every change is saved to songs.csv at once (the same file Excel opens).
 """
@@ -11,9 +11,9 @@ import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
-                               QHBoxLayout, QHeaderView, QInputDialog, QLineEdit, QMessageBox, QPushButton,
-                               QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
+                               QHeaderView, QInputDialog, QLineEdit, QMenu, QMessageBox, QPushButton,
+                               QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import audio
 import catalog
@@ -26,20 +26,28 @@ SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epip
                  churchyear.PATRIOTIC: "Patriotic"}
 SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Allowed to broadcast", "Needs permission",
         "Not looked up")
-COLUMNS = (("On", 52), ("Title", 300), ("Seasons", 160), ("Length", 70), ("Words", 64), ("Public domain", 130),
-           ("File", 220))
-ON, TITLE, SEASONS, LENGTH, WORDS, PD, FILE = range(7)
+# The choices above the list: what the button says, and its name in matches().
+FILTERS = (("All", "All songs"), ("Allowed to broadcast", "Allowed to broadcast"),
+           ("Needs permission", "Needs permission"), ("Not looked up", "Not looked up"), ("No words", "No words"),
+           ("Off", "Off"))
+COLUMNS = (("On", 76), ("", 48), ("Title", 300), ("Season", 190), ("Length", 90), ("May broadcast", 180))
+ON, PLAY, TITLE, SEASONS, LENGTH, PD = range(6)
+ROW_HEIGHT = 46
 KEY = Qt.UserRole + 1  # on the Title item: the song's key in the song list (its file path)
 PD_KIND = {"yes": "ok", "allowed": "ok", "check": "warn", "no": "no"}  # the colour of the label
+BROADCAST_LABELS = {"yes": "Public domain", "allowed": "Allowed", "no": "Needs permission", "check": "Check",
+                    "unknown": "Not found"}
+NO_SELECTION = ("Click a switch to turn a song on or off. Double-click a title to rename it, or its season to "
+                "choose when it plays. Select a song to see why it may or may not be broadcast.")
 FILES_CSV = "CSV files (*.csv);;All files (*)"
 PD_ABOUT = ("The app looks up each song's title on Wikidata (free, open data) and says whether the song "
             "(its words and tune) is in the public domain in the US: published before {first}.\n\n"
-            "Yes = public domain. Allowed = under copyright, but released under a license that lets anyone "
-            "broadcast it (Creative Commons), or you gave a permission. No = under copyright. Check = the "
+            "Allowed = under copyright, but released under a license that lets anyone broadcast it "
+            "(Creative Commons), or you gave a permission. Needs permission = under copyright. Check = the "
             "original is old, but a newer version (for example an English translation) may be the one "
-            "sung. ? = not found.\n\n"
+            "sung. Not found = Wikidata does not know the song.\n\n"
             "If you have permission for a song (a streaming or radio license such as CCLI, or the writer's "
-            "OK), select it and click Permission... to mark it Allowed.\n\n"
+            "OK), select it and click Add permission to mark it Allowed.\n\n"
             "This is a guide, not legal advice. It is about the song, not the recording: a modern "
             "recording or arrangement of an old hymn is still protected.")
 
@@ -59,6 +67,15 @@ def pd_label(row):
     if (row.get("permission") or "").strip() and pd != "yes":
         return pdlookup.STATUS_LABELS["allowed"]
     return pdlookup.STATUS_LABELS.get(pd, "")
+
+
+def broadcast_label(row):
+    """What the May broadcast column shows: "Public domain", "Allowed", "Needs permission", "Check",
+    "Not found", or nothing for a song not looked up yet."""
+    pd = (row.get("public_domain") or "").strip().lower()
+    if (row.get("permission") or "").strip() and pd != "yes":
+        pd = "allowed"
+    return BROADCAST_LABELS.get(pd, "")
 
 
 def no_words(row, min_words=catalog.MIN_WORDS):
@@ -180,65 +197,68 @@ def ask_identify(parent, rows, selected, on_ok):
         on_ok(groups[which.checkedId()][1], keep.isChecked(), check_pd.isChecked())
 
 
-class SongsWindow(QDialog):
-    """The Songs window. Open it with exec(): no broadcast is made while songs are edited."""
+class SongsPage(QWidget):
+    """The Songs page of the main window. reload() reads the song list again (when the page is
+    opened); shutdown() stops its background work (when the window closes)."""
 
-    def __init__(self, parent, csv_path, folders, min_words=catalog.MIN_WORDS, get_edges=None,
-                 models_folder="", on_folders=None):
-        super().__init__(parent)
-        self.path, self.folders, self.min_words, self.get_edges = csv_path, folders, min_words, get_edges
-        self.models_folder, self.on_folders = models_folder, on_folders
+    def __init__(self, csv_path, folders, min_words=catalog.MIN_WORDS, get_edges=None, models_folder="",
+                 on_folders=None):
+        super().__init__()
+        self.path, self.on_folders = csv_path, on_folders
+        self.use(folders, min_words, get_edges, models_folder)
         self.rows = catalog.load(csv_path)
         self.row_of, self.counts, self.filling, self.closed, self.pd_running = {}, "", False, False, False
-        self.setWindowTitle("Songs")
-        self.resize(1120, 640)
+        self.jobs = 0  # background work that writes songs.csv (import, look for new songs)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 16, 18, 16)
-        lay.setSpacing(10)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.setSpacing(16)
 
         top = QHBoxLayout()
-        top.addWidget(ui.label("Songs", "title"))
+        top.setSpacing(10)
+        top.addWidget(ui.label("Songs", "pagetitle"))
         self.status = ui.label("", "sub")
         top.addWidget(self.status)
         top.addStretch()
-        self.import_btn = QPushButton("Import list...")
+        self.import_btn = QPushButton("Import list")
         self.import_btn.clicked.connect(self.import_list)
         self.find_btn = QPushButton("Look for new songs")
         self.find_btn.clicked.connect(self.rescan)
-        add = QPushButton("Add songs...")
+        self.pd_btn = QPushButton("Check public domain")
+        self.pd_btn.clicked.connect(self.public_domain)
+        add = QPushButton("Add songs")
         add.setObjectName("primary")
         add.clicked.connect(self.add_songs)
-        for b in (self.import_btn, self.find_btn, add):
+        for b in (self.import_btn, self.find_btn, self.pd_btn, add):
             b.setAutoDefault(False)
             top.addWidget(b)
         lay.addLayout(top)
 
         row = QHBoxLayout()
+        row.setSpacing(12)
         self.find = QLineEdit()
         self.find.setPlaceholderText("Find a song")
         self.find.setClearButtonEnabled(True)
-        self.find.setFixedWidth(280)
+        self.find.setMinimumWidth(160)
+        self.find.setMaximumWidth(320)
         self.find.textChanged.connect(lambda _t: self.fill())
-        row.addWidget(self.find)
-        self.show_box = QComboBox()
-        self.show_box.addItems(SHOW)
-        self.show_box.setMinimumWidth(200)
-        self.show_box.currentIndexChanged.connect(lambda _i: self.fill())
+        row.addWidget(self.find, 1)
+        self.show_box = ui.Segments([text for text, _show in FILTERS])
+        self.show_box.changed.connect(lambda _name: self.fill())
         row.addWidget(self.show_box)
-        row.addSpacing(8)
-        row.addWidget(ui.label("Tick On to turn a song on or off. Double-click a title to rename it, "
-                               "or Seasons to choose when it plays.", "hint"))
         row.addStretch()
         lay.addLayout(row)
 
         self.table = t = QTableWidget(0, len(COLUMNS))
         t.setHorizontalHeaderLabels([c[0] for c in COLUMNS])
         t.verticalHeader().hide()
-        t.verticalHeader().setDefaultSectionSize(34)
+        t.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
         t.setShowGrid(False)
         t.setSelectionBehavior(QAbstractItemView.SelectRows)
         t.setSelectionMode(QAbstractItemView.ExtendedSelection)
         t.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        t.setItemDelegateForColumn(ON, ui.SwitchDelegate(t))
+        t.setItemDelegateForColumn(PLAY, ui.PlayDelegate(t))
+        t.setItemDelegateForColumn(SEASONS, ui.ChipDelegate(t))
         t.setItemDelegateForColumn(PD, ui.PillDelegate(t))
         head = t.horizontalHeader()
         head.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -247,44 +267,64 @@ class SongsWindow(QDialog):
             t.setColumnWidth(i, width)
         head.setSectionResizeMode(TITLE, QHeaderView.Stretch)
         head.setSectionResizeMode(ON, QHeaderView.Fixed)
+        head.setSectionResizeMode(PLAY, QHeaderView.Fixed)
         t.itemChanged.connect(self.item_changed)
+        t.cellClicked.connect(self.click)
         t.cellDoubleClicked.connect(self.double_click)
         t.itemSelectionChanged.connect(self.show_note)
+        t.setContextMenuPolicy(Qt.CustomContextMenu)
+        t.customContextMenuRequested.connect(self.menu)
         for key, slot in ((Qt.Key_Space, lambda: self.set_on(None)), (Qt.Key_Return, self.play_selected),
                           (Qt.Key_Enter, self.play_selected)):
             QShortcut(QKeySequence(key), t, slot, context=Qt.WidgetShortcut)
         lay.addWidget(t, 1)
 
+        # Under the list: the selected song, why it may (not) be broadcast, and what can be done with it.
+        detail = ui.card()
+        box = QHBoxLayout(detail)
+        box.setContentsMargins(20, 16, 20, 16)
+        box.setSpacing(14)
+        self.pill = ui.label("", "pill")
+        box.addWidget(self.pill, 0, Qt.AlignVCenter)
+        text = QVBoxLayout()
+        text.setSpacing(3)
+        self.note_title = ui.label("", "strong")
         self.note = ui.label("", "sub", wrap=True)
-        lay.addWidget(self.note)
-
-        bottom = QHBoxLayout()
-        self.pd_btn = QPushButton("Check public domain...")
-        for text, slot, gap in (("Play", self.play_selected, 0), ("Turn on", lambda: self.set_on(True), 10),
-                                ("Turn off", lambda: self.set_on(False), 0),
-                                ("Rename...", self.rename_selected, 10), ("Seasons...", self.seasons_selected, 0),
-                                ("Identify...", self.identify_selected, 10), (self.pd_btn, self.public_domain, 0),
-                                ("Permission...", self.permission_selected, 0)):
-            b = text if isinstance(text, QPushButton) else QPushButton(text)
+        text.addWidget(self.note_title)
+        text.addWidget(self.note)
+        box.addLayout(text, 1)
+        self.rename_btn, self.seasons_btn = QPushButton("Rename"), QPushButton("Seasons")
+        self.identify_btn, self.permission_btn = QPushButton("Identify"), QPushButton("Add permission")
+        for b, slot in ((self.rename_btn, self.rename_selected), (self.seasons_btn, self.seasons_selected),
+                        (self.identify_btn, self.identify_selected), (self.permission_btn, self.permission_selected)):
             b.setAutoDefault(False)
             b.clicked.connect(slot)
-            bottom.addSpacing(gap)
-            bottom.addWidget(b)
-        bottom.addStretch()
-        close = QPushButton("Close")
-        close.setAutoDefault(False)
-        close.clicked.connect(self.accept)
-        bottom.addWidget(close)
-        lay.addLayout(bottom)
+            box.addWidget(b, 0, Qt.AlignVCenter)
+        lay.addWidget(detail)
 
+        self.fill()
+
+    def use(self, folders, min_words=catalog.MIN_WORDS, get_edges=None, models_folder=""):
+        """Take what the settings say: the song folders, and how songs are measured."""
+        self.folders, self.min_words, self.get_edges = folders, min_words, get_edges
+        self.models_folder = models_folder
+
+    def reload(self):
+        """Read songs.csv again (a build or Excel may have changed it). An empty list: look for songs."""
+        if self.working():
+            return
+        self.rows = catalog.load(self.path)
         self.fill()
         if not self.rows:
             self.rescan()
 
-    def done(self, result):
+    def working(self):
+        """True while background work is writing songs.csv: no broadcast is made meanwhile."""
+        return self.pd_running or self.jobs > 0
+
+    def shutdown(self):
         self.closed = True  # the background work and its timers stop
         self.pd_running = False
-        super().done(result)
 
     # ---- list ---------------------------------------------------------------------------
     def fill(self):
@@ -294,7 +334,8 @@ class SongsWindow(QDialog):
         t.setRowCount(0)
         self.row_of = {}
         shown = [k for k in sorted(self.rows, key=lambda k: title_of(self.rows[k]).lower())
-                 if matches(self.rows[k], self.show_box.currentText(), self.find.text(), self.min_words)]
+                 if matches(self.rows[k], dict(FILTERS)[self.show_box.current()], self.find.text(),
+                            self.min_words)]
         t.setRowCount(len(shown))
         for i, key in enumerate(shown):
             self.row_of[key] = i
@@ -319,22 +360,20 @@ class SongsWindow(QDialog):
         """Write one song into table row i."""
         r, t = self.rows[key], self.table
         on = catalog.is_on(r)
-        w = (r.get("words") or "").strip()
-        texts = ("", title_of(r), seasons_text(r), audio.fmt(catalog._duration(r)), w if w else "-", pd_label(r),
-                 os.path.basename(r["file"]))
+        texts = ("", "", title_of(r), seasons_text(r), audio.fmt(catalog._duration(r)), broadcast_label(r))
         for col, text in enumerate(texts):
             item = t.item(i, col)
             item.setText(text)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | (Qt.ItemIsUserCheckable if col == ON else
-                                                                    Qt.ItemIsEditable if col == TITLE else
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | (Qt.ItemIsEditable if col == TITLE else
                                                                     Qt.NoItemFlags))
             item.setForeground(QColor(ui.colors["text" if on else "off"]))
-            if col in (LENGTH, WORDS):
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        t.item(i, ON).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        t.item(i, ON).setData(Qt.UserRole, on)
+        t.item(i, ON).setToolTip("On: the song may be chosen for a broadcast. Click to turn it "
+                                 + ("off." if on else "on."))
+        t.item(i, PLAY).setToolTip("Play the song")
         t.item(i, TITLE).setData(KEY, key)
+        t.item(i, TITLE).setToolTip(r["file"])
         t.item(i, PD).setData(Qt.UserRole, pd_kind(r))
-        t.item(i, FILE).setToolTip(r["file"])
 
     def refresh(self, key):
         if key in self.row_of:
@@ -367,29 +406,48 @@ class SongsWindow(QDialog):
         return [k for k in (self.key_at(r) for r in rows) if k in self.rows]
 
     def item_changed(self, item):
-        """The person ticked the On box, or typed a new title."""
-        if self.filling:
+        """The person typed a new title."""
+        if self.filling or item.column() != TITLE:
             return
         key = self.key_at(item.row())
         if key not in self.rows:
             return
-        if item.column() == ON:
-            self.rows[key]["enabled"] = "yes" if item.checkState() == Qt.Checked else "no"
-        elif item.column() == TITLE:
-            self.rows[key]["title"] = " ".join(item.text().split())
-        else:
-            return
+        self.rows[key]["title"] = " ".join(item.text().split())
         self.save()
         self.later(self.fill)
 
+    def click(self, row, col):
+        """A click on the switch turns the song on or off; on the play button, plays it."""
+        key = self.key_at(row)
+        if key not in self.rows:
+            return
+        if col == ON:
+            self.set_on(None, [key])
+        elif col == PLAY:
+            self.play(key)
+
     def double_click(self, row, col):
         key = self.key_at(row)
-        if not key:
-            return
-        if col == SEASONS:
+        if key and col == SEASONS:
             self.edit_seasons([key])
-        elif col not in (ON, TITLE):  # a double-click on the title itself already edits it
+        elif key and col in (LENGTH, PD):  # a double-click on the title itself already edits it
             self.rename(key)
+
+    def menu(self, pos):
+        """Right-click on the list: everything that can be done with the selected songs."""
+        if not self.selected():
+            return
+        m = QMenu(self)
+        for text, slot in (("Play", self.play_selected), (None, None), ("Turn on", lambda: self.set_on(True)),
+                           ("Turn off", lambda: self.set_on(False)), (None, None),
+                           ("Rename", self.rename_selected), ("Seasons", self.seasons_selected),
+                           ("Identify", self.identify_selected), (None, None),
+                           ("Check public domain", self.public_domain), ("Permission", self.permission_selected)):
+            if text is None:
+                m.addSeparator()
+            else:
+                m.addAction(text, slot)
+        m.exec(self.table.viewport().mapToGlobal(pos))
 
     def set_on(self, on, keys=None):
         """Turn the songs on (True), off (False), or flip each one (None)."""
@@ -402,9 +460,11 @@ class SongsWindow(QDialog):
 
     def play_selected(self):
         keys = self.selected()
-        if not keys:
-            return
-        path = self.rows[keys[0]]["file"]
+        if keys:
+            self.play(keys[0])
+
+    def play(self, key):
+        path = self.rows[key]["file"]
         if not os.path.exists(path):
             QMessageBox.critical(self, "Songs", f"File not found:\n{path}")
             return
@@ -535,17 +595,30 @@ class SongsWindow(QDialog):
             self.run_import(picked[0])
 
     def show_note(self):
-        """Under the list: why the selected song is (or is not) in the public domain, and the
-        permission typed for it."""
+        """Under the list: why the selected song is (or is not) in the public domain, the
+        permission typed for it, and its file."""
         keys = self.selected()
         r = self.rows.get(keys[0]) if len(keys) == 1 else None
-        note = (r.get("pd_note") or "").strip() if r else ""
-        permission = (r.get("permission") or "").strip() if r else ""
-        text = [f"Public domain: {note}"] if note else []
-        if permission:
-            text.append(f"Allowed to broadcast: {permission}")
-        self.note.setText("\n".join(text))
-        self.note.setVisible(bool(text))
+        text, label, permission = [], "", ""
+        if r:
+            note, permission = (r.get("pd_note") or "").strip(), (r.get("permission") or "").strip()
+            label = broadcast_label(r)
+            if note:
+                text.append(note if note.endswith((".", "?", "!")) else note + ".")
+            if permission:
+                text.append(f"Allowed to broadcast: {permission}")
+            words = (r.get("words") or "").strip()
+            text.append(r["file"] + (f"  ({words} words heard)" if words else ""))
+        self.note_title.setText(title_of(r) if r else f"{len(keys)} songs selected" if keys else "No song selected")
+        self.note.setText("\n".join(text) if r else "" if keys else NO_SELECTION)
+        self.note.setVisible(bool(self.note.text()))
+        self.pill.setText(label)
+        self.pill.setVisible(bool(label))
+        ui.set_prop(self.pill, "kind", pd_kind(r) if r else "")
+        self.rename_btn.setEnabled(len(keys) == 1)
+        self.seasons_btn.setEnabled(bool(keys))
+        self.permission_btn.setEnabled(bool(keys))
+        self.permission_btn.setText("Change permission" if permission else "Add permission")
 
     def permission_selected(self):
         """Type why the church may broadcast the selected songs (a license, a letter). Empty clears it."""
@@ -624,7 +697,7 @@ class SongsWindow(QDialog):
                         self.show_note()
                 else:
                     self.pd_running = False
-                    self.pd_btn.setText("Check public domain...")
+                    self.pd_btn.setText("Check public domain")
                     self.pd_btn.setEnabled(True)
                     self.fill()
                     if msg[0] == "error":
@@ -651,8 +724,10 @@ class SongsWindow(QDialog):
             if t.is_alive():
                 QTimer.singleShot(200, wait)
                 return
+            self.jobs -= 1
             then(result.get("out"), result.get("error"))
 
+        self.jobs += 1
         t = threading.Thread(target=run, daemon=True)
         t.start()
         wait()

@@ -131,7 +131,7 @@ def check_words(path, rows, count_words, min_words=MIN_WORDS, log=print):
             r["enabled"] = "no"
             off.append(r)
             log(f"No words heard in {r.get('title') or os.path.basename(r['file'])}: turned off "
-                "(turn it back on in Songs... if it is a good song)")
+                "(turn it back on in Songs if it is a good song)")
         save(path, rows)  # keep the progress if the build stops
     return off
 

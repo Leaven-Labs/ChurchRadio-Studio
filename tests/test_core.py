@@ -869,6 +869,8 @@ class SongsWindowHelpers(unittest.TestCase):
         m = songs_window.matches
         self.assertEqual([songs_window.pd_label(r) for r in songs],
                          ["Yes", "Allowed", "Allowed", "No", "Check", "Allowed", ""])
+        self.assertEqual([songs_window.broadcast_label(r) for r in songs],
+                         ["Public domain", "Allowed", "Allowed", "Needs permission", "Check", "Allowed", ""])
         self.assertEqual([m(r, "Public domain", "") for r in songs], [True, False, False, False, False, False, False])
         self.assertEqual([m(r, "Allowed to broadcast", "") for r in songs],
                          [True, True, True, False, False, True, False])
@@ -887,8 +889,8 @@ except ImportError:  # pragma: no cover
 @unittest.skipIf(setup_wizard is None, "PySide6 not installed")
 class SetupWizardModule(unittest.TestCase):
     def test_pages(self):
-        self.assertTrue(callable(setup_wizard.SetupWizard.page_welcome))
-        self.assertFalse(hasattr(setup_wizard.SetupWizard, "import_old"))
+        self.assertTrue(callable(setup_wizard.SettingsForm.page_welcome))
+        self.assertFalse(hasattr(setup_wizard.SettingsForm, "import_old"))
 
 
 class SaveConfig(unittest.TestCase):
@@ -1100,8 +1102,8 @@ class Windows(unittest.TestCase):
                 "public_domain": pd}})
 
     def songs_window(self):
-        w = songs_window.SongsWindow(None, self.csv, [self.dir.name])
-        self.addCleanup(w.done, 0)
+        w = songs_window.SongsPage(self.csv, [self.dir.name])
+        self.addCleanup(w.shutdown)
         return w
 
     def test_theme(self):
@@ -1124,8 +1126,11 @@ class Windows(unittest.TestCase):
         shown, the lock is taken and given back, and the result is told."""
         told = []
 
-        def build(path, date=None, log=print, **more):
+        def build(path, date=None, log=print, tell=None, **more):
             log('Searching for "Good morning" in the first 30 min (takes about 30 s) ...')
+            tell("start", 542.0)
+            tell("end", 4095.0)
+            tell("hour", {"intro": 32.0, "service": 3080.0, "target": 3600, "songs": [("Amazing Grace", 242.0)]})
             log("Writing MP3 (no compression) ...")
             return os.path.join(self.dir.name, "out.mp3")
 
@@ -1137,20 +1142,25 @@ class Windows(unittest.TestCase):
             self.addCleanup(w.close)
             w.start(os.path.join(self.dir.name, "service 11.15.2026.mkv"))
             self.assertTrue(w.busy)
-            self.assertFalse(w.songs_btn.isEnabled())
+            self.assertFalse(w.nav["songs"].isEnabled())
             _pump(lambda: not w.busy)
             self.assertEqual(made.call_args[1]["date"], D(2026, 11, 15))  # read from the file name
             self.assertEqual(w.date.get(), D(2026, 11, 15))
             self.assertIn("Writing MP3", w.text.toPlainText())
             self.assertEqual(w.status.text(), "Done.")
             self.assertTrue(told and told[0].startswith("MP3 saved:"))
-            self.assertTrue(w.songs_btn.isEnabled())
+            self.assertTrue(w.nav["songs"].isEnabled())
+            self.assertEqual([w.steps[k].state for k in w.steps], ["done"] * 5)
+            self.assertEqual((w.steps["start"].value.text(), w.steps["end"].value.text()), ("9:02", "1:08:15"))
+            self.assertEqual((w.steps["songs"].value.text(), w.total.text()), ("1 song", "55:54"))
+            self.assertEqual(w.drop.name.text(), "service 11.15.2026.mkv")
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
 
             made.side_effect = RuntimeError("ffmpeg not found")
             w.start(os.path.join(self.dir.name, "service.mkv"))
             _pump(lambda: not w.busy)
             self.assertEqual((w.status.text(), told[-1]), ("Failed.", "ffmpeg not found"))
+            self.assertIsNone(w.hour)  # the hour of the build before is not left on show
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
 
     def test_date_field(self):
@@ -1166,21 +1176,21 @@ class Windows(unittest.TestCase):
         t = w.table
         self.assertEqual(t.rowCount(), 3)
         self.assertEqual([t.item(i, songs_window.TITLE).text() for i in range(3)], ["Amazing Grace", "b", "Organ"])
-        self.assertEqual([t.item(i, songs_window.ON).checkState() == Qt.Checked for i in range(3)],
+        self.assertEqual([t.item(i, songs_window.ON).data(Qt.UserRole) for i in range(3)],
                          [True, True, False])
         self.assertEqual([t.item(i, songs_window.PD).data(Qt.UserRole) for i in range(3)], ["ok", "no", ""])
         self.assertEqual(w.status.text(), "3 songs, 2 on")
-        w.show_box.setCurrentText("Off")
+        w.show_box.set_current("Off")
         self.assertEqual(t.rowCount(), 1)
         self.assertEqual(w.status.text(), "1 shown. 3 songs, 2 on")
-        w.show_box.setCurrentText("All songs")
+        w.show_box.set_current("All")
         w.find.setText("grace")
         self.assertEqual(t.rowCount(), 1)
 
     def test_songs_tick_and_rename_are_saved(self):
         w = self.songs_window()
         a, b = self.songs["a.mp3"], self.songs["b.mp3"]
-        w.table.item(w.row_of[a], songs_window.ON).setCheckState(Qt.Unchecked)  # the person unticks On
+        w.click(w.row_of[a], songs_window.ON)  # the person clicks the switch
         _pump()
         self.assertEqual(catalog.load(self.csv)[a]["enabled"], "no")
         w.table.item(w.row_of[b], songs_window.TITLE).setText("  Beautiful   Savior ")  # types a title
@@ -1198,9 +1208,32 @@ class Windows(unittest.TestCase):
     def wizard(self, **cfg):
         base = {"broadcast_name": "St. John Radio", "target_minutes": 60, "tolerance_seconds": 30,
                 "song_folders": [self.dir.name], "patriotic_holidays": ["memorial"]}
-        w = setup_wizard.SetupWizard(None, {**base, **cfg}, first_run=False)
-        self.addCleanup(w.done, 0)
+        w = setup_wizard.SettingsForm({**base, **cfg}, wizard=True)
+        self.addCleanup(w.deleteLater)
         return w
+
+    def test_pages_of_the_window(self):
+        """The menu opens each page; the Settings page saves, and the window takes the new name."""
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}):
+            builder.save_history(D(2026, 11, 8), [self.songs["a.mp3"]], self.songs["c.mp3"])
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            for i, (key, _text) in enumerate(mainwindow.PAGES):
+                w.show_page(key, models=False)
+                self.assertEqual((w.pages.currentIndex(), w.nav[key].isChecked()), (i, True))
+            self.assertEqual(w.history_page.table.rowCount(), 1)
+            self.assertEqual(w.history_page.table.item(0, 0).text(), "Sun, Nov 8, 2026")
+            form = w.settings_form
+            form.name.setText("St. John Radio")
+            w.save_song_folders([self.dir.name])  # as Add songs does: the page must not undo it
+            form.finish()
+            saved = builder.load_config()
+            self.assertEqual((saved["broadcast_name"], saved["song_folders"]), ("St. John Radio", [self.dir.name]))
+            self.assertEqual(w.name_label.text(), "St. John Radio")
+            w.set_busy(True)  # while a broadcast is made the songs and settings stay shut
+            w.show_page("songs")
+            self.assertEqual(w.pages.currentIndex(), 0)
+            w.set_busy(False)
 
     def test_settings_collect(self):
         w = self.wizard(theme="dark", keep_me=7)

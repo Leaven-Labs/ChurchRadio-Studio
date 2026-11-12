@@ -24,7 +24,7 @@ ready-to-air MP3:
 
 Everything runs **on your own computer**. The speech recognition is downloaded once and then works
 offline. Nothing about your services leaves the PC; the only thing that ever does is a song's title,
-when you click **Check public domain...** to look songs up.
+when you click **Check public domain** to look songs up.
 
 Created by **Aaron Steger** for **Bethany Lutheran Church**, Fredericksburg, Texas, and its weekly
 radio broadcast, and shared so other congregations can use it. Published by
@@ -99,7 +99,7 @@ app appears in your applications menu, and the command `~/.local/bin/churchradio
 
 ## First start: the setup wizard
 
-A short wizard sets the app up for your church. You can change everything later in **Settings...**.
+A short wizard sets the app up for your church. You can change everything later on the **Settings** page.
 
 1. **Welcome.**
 2. **Broadcast** — your program's name (used in the file name, e.g. `St. John Radio 2026-11-15.mp3`),
@@ -117,9 +117,15 @@ A short wizard sets the app up for your church. You can change everything later 
 1. Start **ChurchRadio Studio**.
 2. **Drop the recording on the window** (MKV, MP4, WAV, MP3 or M4A) or on the program's icon, or
    click **Browse...**.
-3. Watch the log. It takes a few minutes: about 30 seconds to find the start, 1 to 3 minutes to find
-   the end, then joining and compressing.
+3. Watch **Progress**: each step gets a tick, with where the start and end were cut. It takes a few
+   minutes: about 30 seconds to find the start, 1 to 3 minutes to find the end, then joining and
+   compressing. **The hour** shows the intro, the service and the songs that were chosen, to scale.
+   **Show the details** shows everything the app wrote while it worked.
 4. The app tells you where the MP3 was saved.
+
+The menu at the left opens the other pages: **Songs**, **History** (the broadcasts you made, with their
+songs; **Play** one or **Show in folder**) and **Settings**. Songs and Settings are shut while a
+broadcast is being made.
 
 To have the computer do this every week with no one at it, see
 [Making it automatically](#making-it-automatically-task-scheduler) (Windows) or
@@ -254,24 +260,25 @@ end of each song, and at the end of the service, is removed, so there are no gap
 
 ## Your songs
 
-**Songs...** lists every song with its title, seasons, length and how many words were heard in it.
-Every change is saved at once.
+The **Songs** page lists every song with its title, seasons, length and whether it may be broadcast.
+Every change is saved at once. Select a song to see its file, how many words were heard in it, and why
+it may or may not be broadcast, under the list. A right-click on the list has every action too.
 
-- **On / off** — click the tick box in the **On** column, or select several and click **Turn on** /
-  **Turn off**. Songs that are off are never used.
-- **Rename** — double-click the title.
-- **Seasons** — double-click the seasons and tick when the song may play. None = **General** (any
+- **On / off** — click the switch in the **On** column, or select several and right-click → **Turn
+  on** / **Turn off** (or press Space). Songs that are off are never used.
+- **Rename** — double-click the title, or click **Rename**.
+- **Seasons** — double-click the season (or click **Seasons**) and tick when the song may play. None = **General** (any
   time). Holy Week also uses Lent songs. **Patriotic** songs play only on the weekend nearest a
   holiday you chose, and then come first.
-- **Play** — opens the song in your music player.
-- **Find** / **Show** — search by name, or show only songs that are on, off, have no words, are in
-  the public domain, are allowed to broadcast (public domain, a free license or your permission),
-  need permission, or haven't been looked up yet.
+- **Play** — the round button opens the song in your music player.
+- **Find** and the buttons next to it — search by name, or show only songs that are allowed to
+  broadcast (public domain, a free license or your permission), need permission, haven't been looked
+  up yet, have no words, or are off.
 - **Look for new songs** — scan your song folders again.
 
 ### Add songs
 
-**Songs... → Add songs...** and pick the files (from a USB stick, a download folder, anywhere). For
+**Songs → Add songs** and pick the files (from a USB stick, a download folder, anywhere). For
 each one the app suggests a **title** and **seasons** from:
 
 1. the file's **tags**, if they hold a real title (not "Track 03");
@@ -288,7 +295,7 @@ internet) runs the [public-domain lookup](#public-domain) on each song as it is 
 answer in the table and saves it with the song. You can tick or untick it at any time: ticking it
 looks up the songs already done too.
 
-**Identify...** does the same for songs already in your list. Choose the songs: the ones you
+**Identify** does the same for songs already in your list. Choose the songs: the ones you
 selected, every song without a title, or **all songs** (a bulk scan). Two options:
 
 - **Keep the titles and seasons songs already have** (on by default) — only songs with no title get a
@@ -302,7 +309,7 @@ Listening takes a few seconds per song, so a bulk scan of a large list can take 
 
 ### Import a song list
 
-**Songs... → Import list...** adds many songs at once from a CSV file, or changes the titles, seasons
+**Songs → Import list** adds many songs at once from a CSV file, or changes the titles, seasons
 and on/off of songs already in your list. Click **Download template...**, fill it in Excel (save as
 CSV), then click **Import a file...**. Columns:
 
@@ -320,25 +327,25 @@ can't be used (file not found, unknown season) are skipped and listed.
 
 ### Public domain
 
-**Songs... → Check public domain...** looks up each title on [Wikidata](https://www.wikidata.org) (free,
-open data) and fills the **Public domain** column — for the selected songs, or with none selected,
+**Songs → Check public domain** looks up each title on [Wikidata](https://www.wikidata.org) (free,
+open data) and fills the **May broadcast** column — for the selected songs, or with none selected,
 every song not looked up yet. It needs the internet and takes a second or two per song; **Stop** keeps
 the songs already done.
 
-- **Yes** — public domain in the US: published before 1931 (the year moves on each January).
+- **Public domain** — in the US: published before 1931 (the year moves on each January).
 - **Allowed** — under copyright, but you may broadcast it: Wikidata lists a Creative Commons license
   for it (give the credit it asks for), or you gave a permission (below). A NonCommercial license
   shows **Check** instead, since it covers only non-commercial use.
-- **No** — under copyright.
+- **Needs permission** — under copyright.
 - **Check** — the original is old, but a newer version may be the one sung: "How Great Thou Art" is
   Swedish from 1885, but the English version is from 1949. Also shown when only an original in
   another language was found, when only part of the title matched ("Amazing Grace (My Chains Are
   Gone)"), or when Wikidata's dates disagree.
-- **?** — not found, or no dates to go on.
+- **Not found** — not found, or no dates to go on.
 
-**Permission...** — if you have permission to broadcast songs that are under copyright (a
+**Add permission** — if you have permission to broadcast songs that are under copyright (a
 streaming or radio license such as CCLI's, your station's ASCAP/BMI/SESAC licenses, or the writer's
-OK), select them, click **Permission...** and type what it is (for example `CCLI Streaming License
+OK), select them, click **Add permission** and type what it is (for example `CCLI Streaming License
 123456`). They then show as **Allowed**, and the lookup never removes it. Leave it empty to take it
 off. You can also fill the `permission` column in an [imported list](#import-a-song-list).
 
@@ -376,7 +383,7 @@ The app's list has lyric lines only for public-domain hymns; newer songs are lis
 
 ## Settings
 
-Most settings are in **Settings...**. All of them are in `config.json` in your
+Most settings are on the **Settings** page (click **Save** at the top when you have changed them). All of them are in `config.json` in your
 [settings folder](#where-your-files-are); edit it in Notepad for the rest (close the app first).
 
 | Setting | Default | What it does |
@@ -410,7 +417,7 @@ Most settings are in **Settings...**. All of them are in `config.json` in your
 | `models_folder` | (none) | A folder that already holds the speech models. |
 | `setup_done` | `false` | Set to `false` to see the setup wizard again. |
 
-**Song list (`songs.csv`)** — edited by the Songs window, or open it in Excel. Columns: `file`,
+**Song list (`songs.csv`)** — edited by the Songs page, or open it in Excel. Columns: `file`,
 `title`, `duration`, `seasons`, `enabled` (`yes`/`no`), `words` (empty = not checked yet),
 `start_silence` / `end_silence` (seconds; empty = not measured yet), `public_domain`
 (`yes`/`allowed`/`no`/`check`/`unknown`; empty = not looked up), `pd_note` (why) and `permission`
@@ -444,7 +451,7 @@ history and the speech models are kept.
 
 ## Troubleshooting
 
-**The app's look.** The app is light or dark as your computer is set. To choose yourself: **Settings...**
+**The app's look.** The app is light or dark as your computer is set. To choose yourself: **Settings**
 → **The app's look**.
 
 **Linux: the app does not open.** Start it from a terminal (`~/.local/bin/churchradio-studio`) to see
@@ -457,7 +464,7 @@ and the **Service start** mode. Send `end_words.txt` from your settings folder i
 **The MP3 is too long.** The intro and service alone are longer than the broadcast, so no songs were
 added. Trim it by hand, or raise the broadcast length.
 
-**A song keeps being chosen that shouldn't be.** In **Songs...**, turn it off or change its seasons.
+**A song keeps being chosen that shouldn't be.** On the **Songs** page, turn it off or change its seasons.
 
 **The scheduled broadcast wasn't made.** Open the newest log in `%APPDATA%\ChurchRadio Studio\logs`:
 - *Nothing to do* — the newest recording's MP3 was already there, the recording was still being
@@ -532,11 +539,11 @@ release with the three downloads and `SHA256SUMS.txt`.
 | File | What it is |
 |---|---|
 | `app.py` | Starts the app: the window, or `--build` / `--selftest` / `--uitest` from the command line. |
-| `mainwindow.py` | The main window. |
+| `mainwindow.py` | The main window: the menu at the left, the Broadcast and History pages. |
 | `ui.py` | The look: light and dark colours, the style sheet, the service date box. |
 | `cli.py` | `--build`: making the broadcast with no window, for Task Scheduler. |
-| `setup_wizard.py` | The setup wizard, also used by **Settings...**. |
-| `songs_window.py` | The Songs window. |
+| `setup_wizard.py` | The settings: the setup wizard and the Settings page. |
+| `songs_window.py` | The Songs page. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
 | `builder.py` | Makes one broadcast: intro + service + songs. |
 | `prelude.py` | Speech recognition: finding the start and end of the service. |

@@ -1,18 +1,20 @@
-"""Setup wizard: shown on the first start, and again from the Settings... button.
+"""The settings: as a setup wizard on the first start, and as the Settings page of the main window.
 
-It asks for everything that is particular to a church: the broadcast name and length, the look
-(light or dark), the intro,
-the song folders, the words that start and end the service, the patriotic holidays, and it can
-download the speech models.
+They ask for everything that is particular to a church: the broadcast name and length, the look
+(light or dark), the intro, the song folders, the words that start and end the service, the
+patriotic holidays, and they can download the speech models.
 Everything is saved to the user's config.json (builder.save_config).
+
+SettingsForm holds the fields. As a wizard it shows one page at a time (Back / Next); as the
+Settings page it shows them all under each other, with one Save button.
 """
 import os
 import threading
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QGroupBox, QHBoxLayout, QLineEdit,
-                               QListWidget, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout,
-                               QWidget)
+                               QListWidget, QMessageBox, QProgressBar, QPushButton, QScrollArea, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 import builder
 import churchyear
@@ -37,17 +39,27 @@ def folder_size_mb(folder):
     return total / 1e6
 
 
-class SetupWizard(QDialog):
-    """first_run: start at the welcome page; else (Settings) start at the broadcast page and
-    allow Save on every page. on_done(cfg) is called after saving. Open it with exec()."""
+class SettingsForm(QWidget):
+    """The settings fields. wizard: one page at a time, with Back / Next (first_run: from the
+    welcome page, and Finish only on the last page); else all of them on one page with Save.
+    on_done(cfg) is called after saving, on_cancel() when Cancel is clicked in the wizard."""
 
-    def __init__(self, parent, cfg, on_done=None, first_run=True):
-        super().__init__(parent)
-        self.cfg, self.on_done, self.first_run = dict(cfg), on_done, first_run
-        self.setWindowTitle("Set up ChurchRadio Studio" if first_run else "Settings")
-        self.resize(800, 560)
+    def __init__(self, cfg, on_done=None, wizard=False, first_run=False, on_cancel=None):
+        super().__init__()
+        self.cfg, self.on_done, self.wizard, self.first_run = dict(cfg), on_done, wizard, first_run
+        self.folders = list(self.cfg.get("song_folders") or [])
+        self.pages = [self.page_welcome, self.page_broadcast, self.page_intro, self.page_songs,
+                      self.page_service, self.page_models, self.page_done]
+        self.titles = ["Welcome", "Broadcast", "Intro", "Songs", "Service words", "Speech models", "Done"]
+        self.download = None
+        self.closed = False
+        self.done_ok = False
+        self.page = 0
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 18, 22, 16)
+        if not wizard:
+            self.all_on_one_page(lay)
+            return
+        lay.setContentsMargins(0, 0, 0, 0)
         self.stack = QStackedWidget()
         lay.addWidget(self.stack, 1)
         nav = QHBoxLayout()
@@ -55,7 +67,7 @@ class SetupWizard(QDialog):
         nav.addWidget(self.step_label)
         nav.addStretch()
         cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
+        cancel.clicked.connect(lambda: on_cancel() if on_cancel else None)
         self.back_btn = QPushButton("< Back")
         self.back_btn.clicked.connect(lambda: self.go(self.page - 1))
         self.next_btn = QPushButton("Next >")
@@ -69,15 +81,6 @@ class SetupWizard(QDialog):
             if b is cancel:
                 nav.addSpacing(14)
         lay.addLayout(nav)
-
-        self.folders = list(self.cfg.get("song_folders") or [])
-        self.pages = [self.page_welcome, self.page_broadcast, self.page_intro, self.page_songs,
-                      self.page_service, self.page_models, self.page_done]
-        self.titles = ["Welcome", "Broadcast", "Intro", "Songs", "Service words", "Speech models", "Done"]
-        self.download = None
-        self.closed = False
-        self.done_ok = False
-        self.page = 0
         for build in self.pages:  # every page is made once; the last one is filled in when shown
             self.body = QVBoxLayout()
             self.body.setContentsMargins(0, 0, 0, 0)
@@ -89,16 +92,50 @@ class SetupWizard(QDialog):
             self.body.addStretch()
         self.go(0 if first_run else 1)
 
-    def done(self, result):
-        self.closed = True
-        super().done(result)
+    def all_on_one_page(self, lay):
+        """The Settings page: every group of settings in its own card, and Save at the top."""
+        lay.setContentsMargins(28, 24, 12, 0)
+        lay.setSpacing(16)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 16, 0)
+        top.setSpacing(12)
+        top.addWidget(ui.label("Settings", "pagetitle"))
+        self.saved_label = ui.label("", "sub")
+        top.addWidget(self.saved_label)
+        top.addStretch()
+        self.finish_btn = QPushButton("Save")
+        self.finish_btn.setObjectName("primary")
+        self.finish_btn.setAutoDefault(False)
+        self.finish_btn.clicked.connect(self.finish)
+        top.addWidget(self.finish_btn)
+        lay.addLayout(top)
+        inside = QWidget()
+        inside.setObjectName("scrollbody")
+        cards = QVBoxLayout(inside)
+        cards.setContentsMargins(0, 0, 16, 24)
+        cards.setSpacing(16)
+        for build in self.pages:
+            if build in (self.page_welcome, self.page_done):
+                continue
+            card = ui.card()
+            self.body = QVBoxLayout(card)
+            self.body.setContentsMargins(20, 16, 20, 18)
+            self.body.setSpacing(8)
+            build()
+            cards.addWidget(card)
+        cards.addStretch()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(inside)
+        lay.addWidget(scroll, 1)
 
-    def reject(self):
-        """Cancel, Esc or the window's close button."""
-        if self.first_run and not ui.ask(self, "Set up", "Stop the setup? It opens again the next time you "
-                                                         "start the app."):
-            return
-        super().reject()
+    def set_folders(self, folders):
+        """The song folders were changed elsewhere (Add songs made a new one)."""
+        self.folders = list(folders)
+        self.cfg["song_folders"] = list(folders)
+        self.folder_list.clear()
+        self.folder_list.addItems(self.folders)
+        self.count_songs()
 
     # ---- settings <-> fields -------------------------------------------------------------
     def collect(self):
@@ -130,7 +167,7 @@ class SetupWizard(QDialog):
 
     # ---- navigation ---------------------------------------------------------------------
     def go(self, page):
-        if not 0 <= page < len(self.pages):
+        if not self.wizard or not 0 <= page < len(self.pages):
             return
         self.page = page
         last = page == len(self.pages) - 1
@@ -181,7 +218,7 @@ class SetupWizard(QDialog):
         self.heading("Welcome", "This app makes your radio broadcast from the week's service recording: "
                      "your intro, the service (with the organ prelude and the end cut off), and songs "
                      "that fill the time. These few steps set it up for your church. You can change "
-                     "everything later with the Settings... button.")
+                     "everything later on the Settings page.")
 
     def page_broadcast(self):
         c = self.cfg
@@ -238,8 +275,8 @@ class SetupWizard(QDialog):
     def page_songs(self):
         self.heading("Your songs", "Songs from these folders (and the folders inside them) fill the "
                      "time after the service. The app picks songs for the church season and avoids "
-                     "repeats. You can turn songs on or off, rename them and set their seasons later "
-                     "with Songs....")
+                     "repeats. You can turn songs on or off, rename them and set their seasons on "
+                     "the Songs page.")
         line = QHBoxLayout()
         self.folder_list = QListWidget()
         self.folder_list.addItems(self.folders)
@@ -313,7 +350,7 @@ class SetupWizard(QDialog):
         self.bar = QProgressBar()
         self.bar.setRange(0, MODELS_MB)
         self.bar.setTextVisible(False)
-        self.bar.setFixedWidth(500)
+        self.bar.setMaximumWidth(500)
         self.body.addWidget(self.bar)
         self.dl_btn = self.button("Download now", self.start_download)
         line = QHBoxLayout()
@@ -405,6 +442,11 @@ class SetupWizard(QDialog):
 
     # ---- save ---------------------------------------------------------------------------
     def finish(self):
+        if not self.wizard:
+            try:  # keep what was written to the settings since the page was made
+                self.cfg = {**self.cfg, **builder.load_config(), "song_folders": list(self.folders)}
+            except (OSError, ValueError):
+                pass
         try:
             c = self.collect()
         except ValueError as e:
@@ -416,6 +458,40 @@ class SetupWizard(QDialog):
         except OSError as e:
             QMessageBox.critical(self, "Settings", f"Could not save the settings:\n{e}")
             return
-        QDialog.accept(self)
+        self.cfg = dict(c)
+        if not self.wizard:
+            self.saved_label.setText("Saved.")
+            QTimer.singleShot(4000, lambda: None if self.closed else self.saved_label.setText(""))
         if self.on_done:
             self.on_done(c)
+
+
+class SetupWizard(QDialog):
+    """The setup wizard of the first start: the settings, one page at a time. on_done(cfg) is
+    called after saving. Open it with exec()."""
+
+    def __init__(self, parent, cfg, on_done=None, first_run=True):
+        super().__init__(parent)
+        self.first_run, self.on_done = first_run, on_done
+        self.setWindowTitle("Set up ChurchRadio Studio" if first_run else "Settings")
+        self.resize(800, 560)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(22, 18, 22, 16)
+        self.form = SettingsForm(cfg, on_done=self.saved, wizard=True, first_run=first_run, on_cancel=self.reject)
+        lay.addWidget(self.form)
+
+    def saved(self, cfg):
+        QDialog.accept(self)
+        if self.on_done:
+            self.on_done(cfg)
+
+    def done(self, result):
+        self.form.closed = True
+        super().done(result)
+
+    def reject(self):
+        """Cancel, Esc or the window's close button."""
+        if self.first_run and not ui.ask(self, "Set up", "Stop the setup? It opens again the next time you "
+                                                         "start the app."):
+            return
+        super().reject()

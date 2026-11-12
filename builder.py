@@ -80,22 +80,24 @@ def _history_path():
     return os.path.join(data_dir(), "history.json")
 
 
-def recent_songs(weeks):
+def load_history():
+    """The broadcasts made so far, oldest first: [{"date", "output", "songs"}, ...]."""
     try:
         with open(_history_path(), encoding="utf-8") as fh:
             hist = json.load(fh)
     except (OSError, ValueError):
-        return set()
+        return []
+    return [e for e in hist if isinstance(e, dict)] if isinstance(hist, list) else []
+
+
+def recent_songs(weeks):
+    hist = load_history()
     hist = hist[-weeks:] if weeks > 0 else []
     return {s for entry in hist for s in entry.get("songs", [])}
 
 
 def save_history(date, songs, output):
-    try:
-        with open(_history_path(), encoding="utf-8") as fh:
-            hist = json.load(fh)
-    except (OSError, ValueError):
-        hist = []
+    hist = load_history()
     hist.append({"date": date.isoformat(), "output": output, "songs": songs})
     with open(_history_path(), "w", encoding="utf-8") as fh:
         json.dump(hist[-52:], fh, indent=1)
@@ -167,13 +169,18 @@ def overlong_warning(intro_len, svc_len, target=3600, tol=30):
 
 
 def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, cut_end=True,
-          compress=True):
+          compress=True, tell=None):
     """Make the broadcast MP3. Returns the output path.
 
     warn(msg) is called when the result needs a manual edit (too long).
     cut_end: cut everything after the congregation's "Thanks be to God" (see find_service_end).
     compress: put the broadcast compressor on the final MP3.
+    tell(what, value) is called with the numbers the window shows as they become known:
+    "start" and "end" (the cuts, seconds into the recording; end None = nothing cut), "silence"
+    (seconds of long silences cut) and "hour" (a dict: the lengths of the intro and the service,
+    the songs as (title, seconds), and the target).
     """
+    tell = tell or (lambda what, value: None)
     cfg = cfg or load_config()
     intro = (cfg.get("intro") or "").strip()
     if intro and not os.path.exists(intro):
@@ -192,13 +199,17 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
 
     with tempfile.TemporaryDirectory(prefix="churchradio_") as tmp:
         start = find_service_start(service, cfg, start_mode or cfg.get("service_start", "Auto"), log)
+        tell("start", start)
         end = find_service_end(service, cfg, start, log) if cut_end else None
         if not cut_end:
             log("Service end: nothing cut at the end.")
+        tell("end", end)
         log("Cutting long silences from the service ...")
         svc = os.path.join(tmp, "service.wav")
         svc_len = audio.trim_service(service, svc, cfg.get("max_silence_seconds", 5),
                                      cfg.get("silence_level_db", -40), log, start, end)
+        if end is not None:  # (with no end cut the uncut length is not known here)
+            tell("silence", max(0.0, end - start - svc_len))
         trim = cfg.get("trim_song_silence", True)
         silence_db = cfg.get("song_silence_db", audio.EDGE_SILENCE_DB)
         svc_end = svc_len
@@ -245,6 +256,9 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
                 if warn:
                     warn(msg)
 
+        tell("hour", {"intro": intro_len, "service": svc_len, "target": target,
+                      "songs": [(s.get("title") or os.path.splitext(os.path.basename(s["path"]))[0],
+                                 s["duration"]) for s in chosen]})
         comp = {**audio.COMPRESSION, **cfg.get("compression", {})}
         comp["enabled"] = comp["enabled"] and compress
         if comp["enabled"]:

@@ -929,6 +929,59 @@ class SaveConfig(unittest.TestCase):
             self.assertEqual(os.path.basename(out), "Test 2026-11-15.mp3")
             self.assertAlmostEqual(audio.duration(out), 3.0, delta=0.3)
 
+    def test_build_with_cuts_set_by_hand(self):
+        """Cuts from the window: the app does not listen for the start and end, the service is
+        cut there, the window is told how far the MP3 is, and making it again leaves one line
+        in the history."""
+        if not _has_ffmpeg():
+            self.skipTest("ffmpeg not installed")
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": d}):
+            svc = os.path.join(d, "service.wav")
+            _tone(svc, [("tone", 10)])
+            cfg = {"intro": "", "song_folders": [], "output_folder": d, "target_minutes": 5,
+                   "compression": {"enabled": False}, "broadcast_name": "Test"}
+            told = []
+            with mock.patch.object(builder, "find_service_start", side_effect=AssertionError("listened")), \
+                    mock.patch.object(builder, "find_service_end", side_effect=AssertionError("listened")):
+                for cuts, length in (((2.0, 8.0), 6.0), ((0.0, None), 10.0)):
+                    out = builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lambda m: None, cuts=cuts,
+                                        tell=lambda what, value: told.append((what, value)))
+                    self.assertAlmostEqual(audio.duration(out), length, delta=0.3)
+                self.assertRaises(RuntimeError, builder.build, svc, cfg=cfg, date=D(2026, 11, 15),
+                                  log=lambda m: None, cuts=(8.0, 2.0))
+            self.assertEqual(told[:2], [("start", 2.0), ("end", 8.0)])
+            done = [v for what, v in told if what == "mp3"]
+            self.assertTrue(done and all(0.0 <= v <= 1.0 for v in done) and done[-1] > 0.5)
+            self.assertEqual(len(builder.load_history()), 1)
+
+    def test_find_cuts_and_history_of_a_broadcast_made_again(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": d}), \
+                mock.patch.object(builder, "find_service_start", return_value=540.0), \
+                mock.patch.object(builder, "find_service_end", return_value=4000.0) as end:
+            told = []
+            tell = lambda what, value: told.append((what, value))  # noqa: E731
+            self.assertEqual(builder.find_cuts("s.mkv", {}, "Auto", True, lambda m: None, tell), (540.0, 4000.0))
+            self.assertEqual(builder.find_cuts("s.mkv", {}, "Auto", False, lambda m: None, tell), (540.0, None))
+            self.assertEqual((end.call_count, told[-1]), (1, ("end", None)))
+            builder.save_history(D(2026, 11, 8), ["a.mp3"], "old.mp3")
+            builder.save_history(D(2026, 11, 15), ["b.mp3"], "new.mp3")
+            self.assertEqual(builder.recent_songs(4), {"a.mp3", "b.mp3"})
+            self.assertEqual(builder.recent_songs(4, not_output="new.mp3"), {"a.mp3"})  # its songs may be used again
+            builder.save_history(D(2026, 11, 15), ["c.mp3"], "new.mp3")
+            self.assertEqual([e["songs"] for e in builder.load_history()], [["a.mp3"], ["c.mp3"]])
+
+    def test_mp3_progress_lines_and_clip(self):
+        self.assertEqual(audio.progress_seconds("out_time_us=12500000\n"), 12.5)
+        self.assertEqual(audio.progress_seconds("out_time_ms=3000000"), 3.0)
+        self.assertIsNone(audio.progress_seconds("out_time_us=N/A"))
+        self.assertIsNone(audio.progress_seconds("progress=continue"))
+        if _has_ffmpeg():
+            with tempfile.TemporaryDirectory() as d:
+                svc = os.path.join(d, "service.mp3")
+                _tone(svc, [("tone", 10)])
+                clip = audio.cut_clip(svc, os.path.join(d, "piece.wav"), 4.0, 3.0)
+                self.assertAlmostEqual(audio.duration(clip), 3.0, delta=0.2)
+
 
 import identify  # noqa: E402
 
@@ -1182,6 +1235,74 @@ class Windows(unittest.TestCase):
             self.assertEqual((w.status.text(), told[-1]), ("Failed.", "ffmpeg not found"))
             self.assertIsNone(w.hour)  # the hour of the build before is not left on show
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+
+    def test_cuts_are_checked_moved_and_played(self):
+        """"Check the cuts" on: the app finds the cuts and waits. The person moves and plays them,
+        then the broadcast is made with those cuts. Moving a cut afterwards offers to make it again."""
+        made, played = [], []
+
+        def build(path, cuts=None, tell=None, **more):
+            made.append(cuts)
+            tell("mp3", 0.5)
+            return os.path.join(self.dir.name, "out.mp3")
+
+        def find_cuts(path, cfg, mode, cut_end, log, tell):
+            tell("start", 542.0)
+            tell("end", 4095.0)
+            return 542.0, 4095.0
+
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.audio, "loudness_outline", return_value=[0.5] * 600), \
+                mock.patch.object(mainwindow.audio, "duration", return_value=4440.0), \
+                mock.patch.object(mainwindow.builder, "build", side_effect=build), \
+                mock.patch.object(mainwindow.builder, "find_cuts", side_effect=find_cuts), \
+                mock.patch.object(mainwindow.player.Player, "play", side_effect=lambda *a: played.append(a)), \
+                mock.patch.object(mainwindow.QMessageBox, "information"):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.resize(1180, 860)
+            w.review.setChecked(True)
+            self.assertTrue(builder.load_config()["review_cuts"])  # remembered for next week
+            w.start(os.path.join(self.dir.name, "service 11.15.2026.mkv"))
+            _pump(lambda: w.reviewing)
+            self.assertEqual((w.busy, made, w.make_btn.text()), (False, [], "Make the broadcast"))
+            self.assertFalse(w.make_btn.isHidden())
+            self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+            self.assertEqual(w.status.text(), "Check the cuts, then click Make the broadcast.")
+            self.assertTrue(w.wave.editable and w.drop.play_start.isEnabled())
+
+            w.nudges[0].click()  # start cut 5 s earlier
+            w.nudges[-1].click()  # end cut 5 s later
+            self.assertEqual(w.wave.cuts, {"start": 537.0, "end": 4100.0})
+            self.assertEqual((w.steps["start"].value.text(), w.steps["end"].value.text()), ("8:57", "1:08:20"))
+            w.wave.move_cut("start", 99999.0)  # never past the end cut
+            self.assertEqual(w.wave.cuts["start"], 4100.0 - w.wave.APART)
+            w.wave.move_cut("start", -5.0)  # at the very start: nothing is cut
+            self.assertIsNone(w.wave.cuts["start"])
+            w.wave.move_cut("start", 537.0)
+            self.assertEqual(w.wave.cut_near(w.wave.cut_x("end") - 3), "end")  # the line can be taken hold of
+            self.assertIsNone(w.wave.cut_near(w.wave.width() / 2))
+
+            w.play("start")
+            _pump(lambda: len(played) == 1)
+            w.play("end")
+            _pump(lambda: len(played) == 2)
+            path = os.path.join(self.dir.name, "service 11.15.2026.mkv")
+            self.assertEqual(played, [(path, 537.0, 12), (path, 4088.0, 12)])
+
+            w.make_btn.click()
+            self.assertTrue(w.busy and not w.wave.editable)
+            _pump(lambda: not w.busy)
+            self.assertEqual((made, w.status.text()), ([(537.0, 4100.0)], "Done."))
+            self.assertTrue(w.make_btn.isHidden())
+            self.assertEqual(w.steps["mp3"].value.text(), "")
+            w.wave.nudge("end", -1)  # after it is made: offer to make it again
+            self.assertEqual((w.make_btn.isHidden(), w.make_btn.text()), (False, "Make the broadcast again"))
+            w.make_btn.click()
+            _pump(lambda: not w.busy)
+            self.assertEqual(made[-1], (537.0, 4099.0))
+        self.assertEqual(mainwindow.time_left(20), "less than a minute left")
+        self.assertEqual((mainwindow.time_left(70), mainwindow.time_left(200)), ("about 1 min left", "about 3 min left"))
 
     def test_date_field(self):
         f = ui.DateField(D(2026, 11, 15))

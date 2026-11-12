@@ -5,12 +5,13 @@ import datetime as dt
 import os
 import queue
 import threading
+import time
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-                               QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 import audio
 import builder
@@ -18,12 +19,15 @@ import catalog
 import churchyear
 import cli
 import paths
+import player
 import prelude
 import setup_wizard
 import songs_window
 import ui
 
 MEDIA = "Service recordings (*.mkv *.mp4 *.wav *.mp3 *.m4a);;All files (*)"
+CLIP_SECONDS = 12  # how much "Play from start cut" and "Play to end cut" play
+NUDGES = (-5, -1, 1, 5)  # the small buttons that move a cut, in seconds
 CREDIT = "Created by Aaron Steger. Published by Leaven Labs."
 PAGES = (("broadcast", "Broadcast"), ("songs", "Songs"), ("history", "History"), ("settings", "Settings"))
 # What the window says it is doing, from the lines the build writes to the log: the words that
@@ -59,6 +63,13 @@ def long_time(sec):
 
 
 clock = ui.clock
+
+
+def time_left(seconds):
+    """How long the MP3 will still take, for reading: "about 2 min left"."""
+    if seconds < 45:
+        return "less than a minute left"
+    return f"about {max(1, int(round(seconds / 60)))} min left"
 
 
 def nice_date(date):
@@ -115,7 +126,7 @@ class DropArea(QFrame):
     """The card a recording is dropped on. (The whole window takes drops; this shows it.) With no
     recording it asks for one; then it shows the recording's name, length and folder."""
 
-    def __init__(self, on_browse):
+    def __init__(self, on_browse, on_play=None):
         super().__init__()
         self.setObjectName("drop")
         self.setMinimumHeight(120)
@@ -152,6 +163,14 @@ class DropArea(QFrame):
         col.addWidget(self.name)
         col.addWidget(self.where)
         row.addLayout(col, 1)
+        self.play_start, self.play_end = QPushButton("Play from start cut"), QPushButton("Play to end cut")
+        for which, b in (("start", self.play_start), ("end", self.play_end)):
+            b.setEnabled(False)
+            b.setMinimumWidth(150)
+            b.setToolTip(f"Hear the {CLIP_SECONDS} seconds " + ("the service will start with."
+                                                               if which == "start" else "the service will end with."))
+            b.clicked.connect(lambda _on=False, w=which: on_play(w) if on_play else None)
+            row.addWidget(b)
         lay.addWidget(self.file)
         self.file.hide()
         self.path, self.length = "", None
@@ -271,6 +290,9 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.q, self.busy, self.warning, self.hour = queue.Queue(), False, None, None
+        self.job = None  # the recording on the page: {"path", "date"}
+        self.reviewing = False  # the cuts were found and wait for the person's OK (see self.review)
+        self.player, self.playing, self.play_starting, self.mp3_started = player.Player(), None, False, None
         atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
         self.setObjectName("root")
         self.setAcceptDrops(True)
@@ -297,6 +319,8 @@ class MainWindow(QWidget):
             self.pages.addWidget(page)
 
         comp = {**audio.COMPRESSION, **cfg.get("compression", {})}
+        self.review.setChecked(bool(cfg.get("review_cuts", False)))
+        self.review.toggled.connect(self.save_review)
         self.compress.setChecked(bool(comp["enabled"]))
         self.compress.setText(f"Compress the final MP3 ({comp['ratio']}:1, for radio)")
         self.show_settings()
@@ -357,6 +381,10 @@ class MainWindow(QWidget):
 
     def make_broadcast_page(self):
         page = QWidget()
+        page.setObjectName("scrollbody")
+        scroll = QScrollArea()  # a low screen (a small laptop) scrolls the page
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
         lay = QVBoxLayout(page)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(16)
@@ -378,7 +406,7 @@ class MainWindow(QWidget):
         top.addWidget(self.choose_btn)
         lay.addLayout(top)
 
-        self.drop = DropArea(self.browse)
+        self.drop = DropArea(self.browse, self.play)
         lay.addWidget(self.drop)
 
         row = QHBoxLayout()
@@ -387,8 +415,12 @@ class MainWindow(QWidget):
         self.cut_end = QCheckBox()
         self.cut_end.setChecked(True)
         self.compress = QCheckBox()
+        self.review = QCheckBox("Check the cuts before the MP3 is written")
+        self.review.setToolTip("The app finds the start and the end and then waits: play them, move them if "
+                               "they are wrong, and click Make the broadcast.")
         row.addWidget(self.cut_end)
         row.addWidget(self.compress)
+        row.addWidget(self.review)
         row.addStretch()
         lay.addLayout(row)
         self.start_hint = ui.label("", "hint", wrap=True)
@@ -399,9 +431,35 @@ class MainWindow(QWidget):
         col = QVBoxLayout(self.wave_card)
         col.setContentsMargins(20, 18, 20, 14)
         col.setSpacing(10)
-        col.addWidget(ui.label("WHERE THE SERVICE IS CUT", "caps"))
+        head = QHBoxLayout()
+        head.addWidget(ui.label("WHERE THE SERVICE IS CUT", "caps"))
+        head.addStretch()
+        self.wave_hint = ui.label("Drag a marker to move a cut", "small")
+        head.addWidget(self.wave_hint)
+        col.addLayout(head)
         self.wave = ui.Waveform()
+        self.wave.moved.connect(self.cut_moved)
         col.addWidget(self.wave)
+        row = QHBoxLayout()  # under the picture: small steps for each cut, and the button that uses them
+        row.setSpacing(6)
+        self.nudges = []
+        self.make_btn = QPushButton("Make the broadcast")
+        self.make_btn.setObjectName("primary")
+        self.make_btn.clicked.connect(self.make)
+        for which in ("start", "end"):
+            for sec in NUDGES:
+                b = QPushButton(f"{'−' if sec < 0 else '+'}{abs(sec)} s")
+                b.setObjectName("mini")
+                b.setToolTip(f"Move the {which} cut {abs(sec)} second{'' if abs(sec) == 1 else 's'} "
+                             + ("earlier." if sec < 0 else "later."))
+                b.clicked.connect(lambda _on=False, w=which, s=sec: self.wave.nudge(w, s))
+                self.nudges.append(b)
+                row.addWidget(b)
+            if which == "start":
+                row.addStretch()
+                row.addWidget(self.make_btn)
+                row.addStretch()
+        col.addLayout(row)
         lay.addWidget(self.wave_card)
         self.wave_card.hide()
 
@@ -454,7 +512,7 @@ class MainWindow(QWidget):
         self.details_btn = QPushButton()
         self.details_btn.setObjectName("ghost")
         self.details_btn.setCursor(Qt.PointingHandCursor)
-        self.details_btn.clicked.connect(lambda: self.show_details(not self.text.isVisibleTo(page)))
+        self.details_btn.clicked.connect(lambda: self.show_details(self.text.isHidden()))
         row.addWidget(self.details_btn)
         row.addStretch()
         lay.addLayout(row)
@@ -467,7 +525,8 @@ class MainWindow(QWidget):
         lay.addWidget(self.filler, 1)
         self.show_details(False)
         self.show_hour(None)
-        return page
+        self.show_cut_controls()
+        return scroll
 
     def show_details(self, show):
         """Show or hide everything the build wrote (the log), under the cards."""
@@ -588,6 +647,7 @@ class MainWindow(QWidget):
             self.settings_form.set_folders(folders)
 
     def closeEvent(self, event):  # noqa: N802  (Qt's name)
+        self.player.close()
         self.songs_page.shutdown()
         if self.settings_form is not None:
             self.settings_form.closed = True
@@ -623,47 +683,102 @@ class MainWindow(QWidget):
             w.setEnabled(not busy)
         self.bar.setRange(0, 0 if busy else 1)  # 0..0: a moving bar, there is no known end
         self.bar.setValue(0)
+        self.mp3_started = None
+        self.show_cut_controls()
 
-    def start(self, path):
+    def show_cut_controls(self, make=None):
+        """The cuts can be moved and played once they are known, and moved only while no broadcast
+        is being made. make: show (True) or hide (False) the Make the broadcast button."""
+        known = self.wave.known()
+        self.wave.set_editable(known and not self.busy)
+        for b in self.nudges:
+            b.setVisible(known)
+            b.setEnabled(not self.busy)
+        self.wave_hint.setVisible(known and not self.busy)
+        for b in (self.drop.play_start, self.drop.play_end):
+            b.setEnabled(known)
+        if make is not None:
+            self.make_btn.setVisible(make)
+        if not known:
+            self.make_btn.hide()
+        self.make_btn.setEnabled(not self.busy)
+        self.make_btn.setText("Make the broadcast" if self.reviewing else "Make the broadcast again")
+
+    def save_review(self, on):
+        """Remember the "Check the cuts" tick for the next time."""
+        try:
+            cfg = builder.load_config()
+            cfg["review_cuts"] = bool(on)
+            builder.save_config(cfg)
+        except (OSError, ValueError):
+            pass  # only not remembered
+
+    def may_start(self):
+        """True if a broadcast can be made now (then the lock is taken); else the person is told why."""
         if self.busy:
-            return
+            return False
         if self.songs_page.working():
             QMessageBox.warning(self, paths.APP_NAME, "The song list is being updated. Try again when it is done.")
-            return
+            return False
         if not cli.take_lock("the app window"):
             QMessageBox.warning(self, paths.APP_NAME, "A broadcast is already being made "
                                 f"({cli.lock_owner()}). Try again when it is done.")
+            return False
+        return True
+
+    def start(self, path):
+        """A recording was chosen: find its cuts and (unless they are checked first) make the broadcast."""
+        if not self.may_start():
             return
         date = churchyear.service_date(self.date.get(), self.date.changed, os.path.basename(path))
         if date != self.date.get():
             self.date.set_date(date)  # show the date read from the file name
             self.show_season()
-        self.warning = None
-        self.show_page("broadcast")
-        self.set_busy(True)
-        self.text.clear()
+        self.job = {"path": path}
+        self.player.stop()
         self.drop.set_file(path)
         self.start_hint.hide()  # (it is the tooltip of Start too) room for the picture of the recording
         self.wave.reset()
         self.wave_card.show()
         threading.Thread(target=self.draw_recording, args=(path,), daemon=True).start()
         self.choose_btn.setText("Choose another recording")
+        self.launch(None)
+
+    def make(self):
+        """Make the broadcast with the cuts as they are in the picture (checked or moved by the person)."""
+        if not self.job or not self.wave.known() or not self.may_start():
+            return
+        self.launch((self.wave.cuts.get("start") or 0.0, self.wave.cuts.get("end")))
+
+    def launch(self, cuts):
+        """Start the work in the background (the lock is taken). cuts None: listen for them first."""
+        self.warning, self.reviewing = None, False
+        self.show_page("broadcast")
+        self.set_busy(True)
+        self.show_cut_controls(make=False)
+        self.text.clear()
         self.show_hour(None)
         for row in self.steps.values():
             row.set("todo", "")
+        path = self.job["path"]
         self.status.setText(f"Working on {os.path.basename(path)} ...")
-        threading.Thread(target=self.work, args=(path, date, self.mode.currentText(), self.cut_end.isChecked(),
-                                                 self.compress.isChecked()), daemon=True).start()
+        threading.Thread(target=self.work, args=(path, self.date.get(), self.mode.currentText(),
+                                                 self.cut_end.isChecked(), self.compress.isChecked(), cuts,
+                                                 self.review.isChecked()), daemon=True).start()
 
-    def work(self, path, date, mode, cut_end, compress):
+    def work(self, path, date, mode, cut_end, compress, cuts=None, review=False):
         try:
-            try:
-                self.tell("recording", audio.duration(path))
-            except Exception:  # noqa: BLE001  (the build says what is wrong with the file)
-                pass
+            if cuts is None:
+                try:
+                    self.tell("recording", audio.duration(path))
+                except Exception:  # noqa: BLE001  (the build says what is wrong with the file)
+                    pass
+                if review:  # only listen for the cuts; the person makes the broadcast (self.make)
+                    self.q.put(("review", builder.find_cuts(path, None, mode, cut_end, self.log, self.tell)))
+                    return
             self.q.put(("done", builder.build(path, date=date, log=self.log, start_mode=mode,
                                               warn=self.set_warning, cut_end=cut_end, compress=compress,
-                                              tell=self.tell)))
+                                              tell=self.tell, cuts=cuts)))
         except Exception as e:  # noqa: BLE001
             self.q.put(("error", str(e)))
 
@@ -674,6 +789,48 @@ class MainWindow(QWidget):
         except Exception:  # noqa: BLE001  (only the picture is missing; the build says what is wrong)
             levels = None
         self.q.put(("wave", (path, levels)))
+
+    # ---- the cuts: moved and played by the person --------------------------------------
+    def cut_moved(self, which):
+        """A cut was dragged or nudged: show its new time and offer to make the broadcast with it."""
+        at = self.wave.cuts.get(which)
+        self.steps[which].set("done", clock(at) if at else "nothing cut")
+        self.player.stop()
+        self.show_cut_controls(make=True)
+        if not self.reviewing:
+            self.status.setText("The cuts were moved.")
+
+    def play(self, which):
+        """Play the seconds after the start cut, or before the end cut. A second click stops it."""
+        if not self.job or not self.wave.known():
+            return
+        if self.playing == which and (self.play_starting or self.player.playing()):
+            self.player.stop()
+            self.playing = None
+            return
+        if which == "start":
+            at = self.wave.cuts.get("start") or 0.0
+        else:
+            at = max(0.0, (self.wave.cuts.get("end") or self.wave.length) - CLIP_SECONDS)
+        self.playing, self.play_starting = which, True
+
+        def run(path=self.job["path"]):
+            try:
+                self.player.play(path, at, CLIP_SECONDS)
+                self.q.put(("played", None))
+            except Exception as e:  # noqa: BLE001  told to the person
+                self.q.put(("played", str(e)))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def show_playing(self):
+        """The play button of the piece that is playing says Stop."""
+        on = self.playing if self.play_starting or self.player.playing() else None
+        for which, b, text in (("start", self.drop.play_start, "Play from start cut"),
+                               ("end", self.drop.play_end, "Play to end cut")):
+            want = "Stop" if on == which else text
+            if b.text() != want:
+                b.setText(want)
 
     def set_warning(self, msg):
         self.warning = msg
@@ -692,6 +849,14 @@ class MainWindow(QWidget):
         if what == "recording":
             self.drop.set_file(self.drop.path, value)
             self.wave.set_length(value)
+        elif what == "mp3":
+            if self.mp3_started is None:
+                self.mp3_started = time.time()
+                self.bar.setRange(0, 1000)
+            self.bar.setValue(int(value * 1000))
+            spent = time.time() - self.mp3_started
+            if value >= 0.05 and spent >= 3 and self.steps["mp3"].state != "done":
+                self.steps["mp3"].set("doing", time_left(spent * (1 - value) / value))
         elif what in ("start", "end"):
             self.wave.set_cut(what, value)
             self.steps[what].set("done", clock(value) if value else "nothing cut")
@@ -703,6 +868,7 @@ class MainWindow(QWidget):
             self.show_hour(value)
 
     def poll(self):
+        self.show_playing()
         while not self.q.empty():
             kind, msg = self.q.get()
             if kind == "tell":
@@ -712,6 +878,21 @@ class MainWindow(QWidget):
             if kind == "wave":  # may come after the build is done; not for an older recording
                 if msg[0] == self.drop.path:
                     self.wave.set_levels(msg[1])
+                continue
+            if kind == "played":  # the piece has started to play, or could not be played
+                self.play_starting = False
+                if msg:
+                    self.playing = None
+                    QMessageBox.warning(self, paths.APP_NAME, f"Could not play the recording:\n{msg}")
+                continue
+            if kind == "review":  # the cuts are found: the person checks them and clicks Make the broadcast
+                cli.drop_lock()
+                self.reviewing = True
+                self.set_busy(False)
+                self.show_cut_controls(make=True)
+                for key in ("start", "end"):
+                    self.steps[key].set("done")
+                self.status.setText("Check the cuts, then click Make the broadcast.")
                 continue
             if kind == "log":
                 self.text.appendPlainText(msg)
@@ -729,6 +910,8 @@ class MainWindow(QWidget):
                     row.set("done")
                 elif row.state == "doing":
                     row.set("failed")
+            self.steps["mp3"].set(self.steps["mp3"].state, "")  # (it said how long was left)
+            self.show_cut_controls(make=kind != "done")
             self.history_page.reload()
             if kind == "done" and self.warning:
                 self.status.setText("Done, but the MP3 is too long. Edit it in Audacity.")
@@ -809,6 +992,11 @@ def uitest():
         window.wave.set_length(4440.0)
         window.wave.set_cut("start", 542.0)
         window.wave.set_cut("end", 4095.0)
+        window.job = {"path": "service.mkv"}
+        window.show_cut_controls(make=True)
+        window.wave.nudge("start", -5)
+        if window.wave.cuts["start"] != 537.0 or window.steps["start"].value.text() != "8:57":
+            raise RuntimeError("the start cut did not move")
         for key, _text in PAGES:
             window.show_page(key, models=False)  # (looking for the models makes the models folder)
             if window.pages.currentIndex() != [k for k, _t in PAGES].index(key):

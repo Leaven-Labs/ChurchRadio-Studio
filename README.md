@@ -122,8 +122,23 @@ A short wizard sets the app up for your church. You can change everything later 
    compressing. **The hour** shows the intro, the service and the songs that were chosen, to scale.
    **Where the service is cut** draws the recording by its loudness, with the start and the end cut
    marked: the bright part is broadcast, the dim parts before and after are cut off.
+   While the MP3 is written, Progress says about how long is left.
    **Show the details** shows everything the app wrote while it worked.
 4. The app tells you where the MP3 was saved.
+
+**If a cut is wrong.** Once the cuts are found you can check and move them:
+
+- **Play from start cut** / **Play to end cut** play the 12 seconds the service will start and end
+  with. Click again to stop.
+- **Drag a marker** in the picture to move a cut, or use the small buttons under it (**−5 s**, **−1 s**,
+  **+1 s**, **+5 s**; the left four move the start, the right four the end). A marker dragged to the
+  very start or end of the recording cuts nothing there.
+- Click **Make the broadcast again**: the MP3 is made again with your cuts (the app does not listen
+  for the words again, so this is quick) and replaces the first one.
+
+To check every week before the MP3 is written, tick **Check the cuts before the MP3 is written**: the
+app finds the cuts and waits for you to click **Make the broadcast**. The tick is remembered.
+Scheduled runs (`--build`) never wait.
 
 The menu at the left opens the other pages: **Songs**, **History** (the broadcasts you made, with their
 songs; **Play** one or **Show in folder**) and **Settings**. Songs and Settings are shut while a
@@ -542,6 +557,7 @@ release with the three downloads and `SHA256SUMS.txt`.
 |---|---|
 | `app.py` | Starts the app: the window, or `--build` / `--selftest` / `--uitest` from the command line. |
 | `mainwindow.py` | The main window: the menu at the left, the Broadcast and History pages. |
+| `player.py` | Plays a piece of the recording (the cuts) with the system's own sound player. |
 | `ui.py` | The look: light and dark colours, the style sheet, the service date box. |
 | `cli.py` | `--build`: making the broadcast with no window, for Task Scheduler. |
 | `setup_wizard.py` | The settings: the setup wizard and the Settings page. |

@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
@@ -165,12 +166,44 @@ def _trim_filter(part):
     return f"atrim={':'.join(cut)},asetpts=PTS-STARTPTS," if cut else ""
 
 
-def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None):
+def progress_seconds(line):
+    """Seconds of sound written so far, from a line of ffmpeg's -progress output, or None."""
+    key, _eq, value = line.strip().partition("=")
+    if key in ("out_time_us", "out_time_ms"):  # (both are microseconds, in every ffmpeg so far)
+        try:
+            return max(0.0, int(value) / 1e6)
+        except ValueError:
+            return None
+    return None
+
+
+def _run_with_progress(args, on_seconds):
+    """Run ffmpeg and call on_seconds(seconds written) as it works. Errors as _run."""
+    with tempfile.TemporaryFile() as err:  # (a pipe nobody reads would fill up and stop ffmpeg)
+        p = subprocess.Popen(args[:1] + ["-nostats", "-progress", "pipe:1"] + args[1:], stdout=subprocess.PIPE,
+                             stderr=err, text=True, errors="replace", creationflags=NO_WINDOW)
+        with p.stdout:
+            for line in p.stdout:
+                sec = progress_seconds(line)
+                if sec is not None:
+                    try:
+                        on_seconds(sec)
+                    except Exception:  # noqa: BLE001  the window's trouble must not stop the MP3
+                        pass
+        p.wait()
+        if p.returncode != 0:
+            err.seek(0)
+            raise RuntimeError(f"{os.path.basename(args[0])} failed:\n"
+                               f"{err.read().decode(errors='replace')[-1500:]}")
+
+
+def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None, progress=None):
     """Join audio files in order into one MP3 (44.1 kHz stereo).
 
     parts: paths, or (path, start, end) to use only start..end seconds of that file (end None =
     to the end): the silence at the start and end of a song is cut so the parts play back to back.
     compression: dict that changes COMPRESSION (for example {"enabled": False}).
+    progress(seconds): called while ffmpeg works with the seconds of the MP3 written so far.
     """
     ff = find_tool("ffmpeg")
     args = [ff, "-y", "-hide_banner"]
@@ -186,8 +219,18 @@ def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None):
              "-map", "[out]", "-c:a", "libmp3lame", "-b:a", bitrate]
     for k, v in (meta or {}).items():
         args += ["-metadata", f"{k}={v}"]
-    _run(args + [dst])
+    if progress:
+        _run_with_progress(args + [dst], progress)
+    else:
+        _run(args + [dst])
     return duration(dst)
+
+
+def cut_clip(src, dst, start, seconds):
+    """Write `seconds` of the recording from `start` as a small WAV (to play it in the window)."""
+    _run([find_tool("ffmpeg"), "-y", "-hide_banner", "-nostdin", "-ss", f"{max(0.0, start):.3f}", "-t",
+          f"{seconds:.3f}", "-i", src, "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", dst])
+    return dst
 
 
 def loudness_outline(path, buckets=600, rate=2000):

@@ -392,6 +392,111 @@ class HourBar(QWidget):
             x += w + gap
 
 
+def clock(sec):
+    """A place in a recording or a length: "9:02", "1:08:15"."""
+    sec = int(round(sec))
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
+
+
+class Waveform(QWidget):
+    """The recording drawn as its loudness along its length, with the two cuts marked: the part
+    that is broadcast is bright, what is cut off before the start and after the end is dim."""
+    TOP, BOTTOM = 30, 24  # room for the cut labels above the wave and the times under it
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(self.TOP + 80 + self.BOTTOM)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.reset()
+
+    def reset(self):
+        """A new recording: nothing is known yet."""
+        self.levels, self.length, self.cuts, self.note = None, 0.0, {}, "Reading the recording ..."
+        self.update()
+
+    def set_levels(self, levels):
+        """levels: numbers 0..1 along the recording (audio.loudness_outline), or None if it failed."""
+        self.levels = levels or None
+        self.note = "" if levels else "The recording could not be drawn. The broadcast is not affected."
+        self.update()
+
+    def set_length(self, seconds):
+        self.length = max(0.0, seconds or 0.0)
+        self.update()
+
+    def set_cut(self, which, seconds):
+        """which: "start" or "end". seconds into the recording; None or 0 = nothing cut there."""
+        self.cuts[which] = seconds or None
+        self.update()
+
+    def steps(self):
+        """The times written under the wave: at most six, at round minutes."""
+        for minutes in (1, 2, 5, 10, 15, 30, 60, 120):
+            if self.length / (minutes * 60) <= 5.5:
+                return [t * minutes * 60 for t in range(int(self.length // (minutes * 60)) + 1)]
+        return [0]
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, mid_h = float(self.width()), self.height() - self.TOP - self.BOTTOM
+        wave = QRectF(0, self.TOP, w, mid_h)
+        length = self.length
+        x_of = (lambda sec: w * min(max(sec / length, 0.0), 1.0)) if length else (lambda sec: 0.0)
+        start = x_of(self.cuts.get("start") or 0.0)
+        end = x_of(self.cuts["end"]) if self.cuts.get("end") else w
+        known = bool(length) and bool(self.cuts)
+
+        for part in ((0.0, start), (end, w)) if known else ():  # what is cut off: a darker ground
+            if part[1] - part[0] > 0.5:
+                p.fillRect(QRectF(part[0], self.TOP, part[1] - part[0], mid_h), QColor(colors["bg"]))
+        p.setPen(Qt.NoPen)
+        if self.levels:
+            n, x, cy = len(self.levels), 1.0, wave.center().y()
+            while x < w - 1:
+                level = self.levels[min(n - 1, int(x / w * n))]
+                h = max(2.0, level * (mid_h - 8))
+                inside = not known or start <= x <= end
+                p.setBrush(QColor(colors["accent" if inside else "disabled"]))
+                p.setOpacity(1.0 if inside else 0.55)
+                p.drawRoundedRect(QRectF(x, cy - h / 2, 2, h), 1, 1)
+                x += 4
+            p.setOpacity(1.0)
+        else:
+            p.setPen(QColor(colors["sub"]))
+            p.drawText(wave, Qt.AlignCenter, self.note)
+
+        font = QFont(self.font())
+        font.setBold(True)
+        if known:  # the two cuts: a line through the wave and a label above it
+            for which, x, name in (("start", start, "Start"), ("end", end, "End")):
+                at = self.cuts.get(which)
+                text = f"{name} {clock(at)}" if at else f"{name}: nothing cut"
+                p.setFont(font)
+                tw = p.fontMetrics().horizontalAdvance(text) + 18
+                left = min(max(x - 1 if which == "start" else x + 1 - tw, 0.0), w - tw)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(colors["accent"]))
+                p.drawRoundedRect(QRectF(left, 0, tw, 22), 5, 5)
+                p.drawRect(QRectF(min(max(x - 1, 0.0), w - 2), 20, 2, self.height() - self.BOTTOM - 20))
+                p.setPen(QColor("white"))
+                p.drawText(QRectF(left, 0, tw, 22), Qt.AlignCenter, text)
+
+        if length:  # the times under the wave; the last one is the length of the recording
+            p.setFont(self.font())
+            p.setPen(QColor(colors["sub"]))
+            fm, y = p.fontMetrics(), self.height() - self.BOTTOM + 6
+            last = clock(length)
+            last_x = w - fm.horizontalAdvance(last)
+            p.drawText(QRectF(last_x, y, w - last_x, 18), Qt.AlignLeft | Qt.AlignVCenter, last)
+            for sec in self.steps():
+                text = clock(sec)
+                tw = fm.horizontalAdvance(text)
+                x = min(max(x_of(sec) - (tw / 2 if sec else 0), 0.0), w - tw)
+                if x + tw + 14 < last_x:
+                    p.drawText(QRectF(x, y, tw + 2, 18), Qt.AlignLeft | Qt.AlignVCenter, text)
+
+
 class StepMark(QWidget):
     """The mark before a step: an empty ring (todo), a turning ring (doing), a green tick (done)
     or a red ring (failed)."""

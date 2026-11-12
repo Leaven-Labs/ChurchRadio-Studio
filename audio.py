@@ -190,6 +190,24 @@ def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None):
     return duration(dst)
 
 
+def loudness_outline(path, buckets=600, rate=2000):
+    """How loud the recording is along its length, for drawing it: `buckets` numbers from 0 to 1.
+
+    ffmpeg plays the sound out as mono at a low sample rate; each number is the loudness (RMS) of
+    one equal slice of it, scaled so that the loud parts of the recording are near 1."""
+    import numpy as np
+    p = subprocess.run([find_tool("ffmpeg"), "-v", "error", "-nostdin", "-i", path, "-vn", "-ac", "1",
+                        "-ar", str(rate), "-f", "s16le", "-"], capture_output=True, creationflags=NO_WINDOW)
+    data = p.stdout[:len(p.stdout) // 2 * 2]
+    if p.returncode != 0 or len(data) < 2 * buckets:
+        raise RuntimeError("ffmpeg could not read the sound:\n" + p.stderr.decode(errors="replace")[-1500:])
+    samples = np.frombuffer(data, dtype="<i2").astype(np.float32)
+    per = len(samples) // buckets
+    loud = np.sqrt((samples[:per * buckets].reshape(buckets, per) ** 2).mean(axis=1))
+    top = float(np.percentile(loud, 98))
+    return np.clip(loud / top, 0.0, 1.0).tolist() if top > 0 else [0.0] * buckets
+
+
 def fmt(sec):
     sec = int(round(sec))
     return f"{sec // 60}:{sec % 60:02d}"

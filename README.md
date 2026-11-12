@@ -120,6 +120,8 @@ A short wizard sets the app up for your church. You can change everything later 
 3. Watch **Progress**: each step gets a tick, with where the start and end were cut. It takes a few
    minutes: about 30 seconds to find the start, 1 to 3 minutes to find the end, then joining and
    compressing. **The hour** shows the intro, the service and the songs that were chosen, to scale.
+   **Where the service is cut** draws the recording by its loudness, with the start and the end cut
+   marked: the bright part is broadcast, the dim parts before and after are cut off.
    **Show the details** shows everything the app wrote while it worked.
 4. The app tells you where the MP3 was saved.
 

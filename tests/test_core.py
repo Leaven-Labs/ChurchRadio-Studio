@@ -222,6 +222,19 @@ class SongSilence(unittest.TestCase):
             self.assertEqual(len(calls), 1)
 
     @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
+    def test_loudness_outline_of_a_real_file(self):
+        """Quiet, tone, quiet: the numbers drawn in the window are low, high, low."""
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "a.mp3")
+            _tone(f, [("quiet", 2), ("tone", 4), ("quiet", 2)])
+            levels = audio.loudness_outline(f, buckets=80)
+            self.assertEqual(len(levels), 80)
+            self.assertTrue(all(0.0 <= v <= 1.0 for v in levels))
+            self.assertLess(max(levels[:15] + levels[-15:]), 0.1)
+            self.assertGreater(min(levels[25:55]), 0.8)
+            self.assertRaises(RuntimeError, audio.loudness_outline, os.path.join(d, "missing.mp3"))
+
+    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
     def test_real_files_join_back_to_back(self):
         with tempfile.TemporaryDirectory() as d:
             a, b = os.path.join(d, "a.mp3"), os.path.join(d, "b.mp3")
@@ -1135,6 +1148,7 @@ class Windows(unittest.TestCase):
             return os.path.join(self.dir.name, "out.mp3")
 
         with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.audio, "loudness_outline", return_value=[0.5] * 600), \
                 mock.patch.object(mainwindow.builder, "build", side_effect=build) as made, \
                 mock.patch.object(mainwindow.QMessageBox, "information", side_effect=lambda *a: told.append(a[2])), \
                 mock.patch.object(mainwindow.QMessageBox, "critical", side_effect=lambda *a: told.append(a[2])):
@@ -1154,6 +1168,12 @@ class Windows(unittest.TestCase):
             self.assertEqual((w.steps["start"].value.text(), w.steps["end"].value.text()), ("9:02", "1:08:15"))
             self.assertEqual((w.steps["songs"].value.text(), w.total.text()), ("1 song", "55:54"))
             self.assertEqual(w.drop.name.text(), "service 11.15.2026.mkv")
+            _pump(lambda: w.wave.levels is not None)  # the picture of the recording, with both cuts
+            self.assertEqual((len(w.wave.levels), w.wave.cuts), (600, {"start": 542.0, "end": 4095.0}))
+            self.assertFalse(w.wave_card.isHidden())
+            w.wave.set_length(4440.0)
+            self.assertEqual(w.wave.steps(), [0, 900, 1800, 2700, 3600])
+            w.grab()
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
 
             made.side_effect = RuntimeError("ffmpeg not found")

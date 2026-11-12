@@ -58,10 +58,7 @@ def long_time(sec):
     return f"{minutes // 60} h {minutes % 60} min" if minutes >= 60 else f"{minutes} min"
 
 
-def clock(sec):
-    """A place in the recording or a total length: "9:02", "1:08:15"."""
-    sec = int(round(sec))
-    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
+clock = ui.clock
 
 
 def nice_date(date):
@@ -277,8 +274,8 @@ class MainWindow(QWidget):
         atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
         self.setObjectName("root")
         self.setAcceptDrops(True)
-        self.resize(1180, 780)
-        self.setMinimumSize(980, 620)
+        self.resize(1180, 860)
+        self.setMinimumSize(980, 700)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -397,6 +394,16 @@ class MainWindow(QWidget):
         self.start_hint = ui.label("", "hint", wrap=True)
         self.start_hint.setContentsMargins(4, 0, 4, 0)
         lay.addWidget(self.start_hint)
+
+        self.wave_card = ui.card()  # shown once there is a recording
+        col = QVBoxLayout(self.wave_card)
+        col.setContentsMargins(20, 18, 20, 14)
+        col.setSpacing(10)
+        col.addWidget(ui.label("WHERE THE SERVICE IS CUT", "caps"))
+        self.wave = ui.Waveform()
+        col.addWidget(self.wave)
+        lay.addWidget(self.wave_card)
+        self.wave_card.hide()
 
         cards = QHBoxLayout()
         cards.setSpacing(16)
@@ -636,6 +643,10 @@ class MainWindow(QWidget):
         self.set_busy(True)
         self.text.clear()
         self.drop.set_file(path)
+        self.start_hint.hide()  # (it is the tooltip of Start too) room for the picture of the recording
+        self.wave.reset()
+        self.wave_card.show()
+        threading.Thread(target=self.draw_recording, args=(path,), daemon=True).start()
         self.choose_btn.setText("Choose another recording")
         self.show_hour(None)
         for row in self.steps.values():
@@ -656,6 +667,14 @@ class MainWindow(QWidget):
         except Exception as e:  # noqa: BLE001
             self.q.put(("error", str(e)))
 
+    def draw_recording(self, path):
+        """In the background, next to the build: read how loud the recording is along its length."""
+        try:
+            levels = audio.loudness_outline(path)
+        except Exception:  # noqa: BLE001  (only the picture is missing; the build says what is wrong)
+            levels = None
+        self.q.put(("wave", (path, levels)))
+
     def set_warning(self, msg):
         self.warning = msg
 
@@ -672,7 +691,9 @@ class MainWindow(QWidget):
         """A number from the build (see builder.build): show it in the progress list or The hour."""
         if what == "recording":
             self.drop.set_file(self.drop.path, value)
+            self.wave.set_length(value)
         elif what in ("start", "end"):
+            self.wave.set_cut(what, value)
             self.steps[what].set("done", clock(value) if value else "nothing cut")
         elif what == "silence":
             self.steps[what].set("done", f"{value:.1f} s")
@@ -687,6 +708,10 @@ class MainWindow(QWidget):
             if kind == "tell":
                 if self.busy:
                     self.told(*msg)
+                continue
+            if kind == "wave":  # may come after the build is done; not for an older recording
+                if msg[0] == self.drop.path:
+                    self.wave.set_levels(msg[1])
                 continue
             if kind == "log":
                 self.text.appendPlainText(msg)
@@ -779,6 +804,11 @@ def uitest():
         window.show()
         window.show_hour({"intro": 32.0, "service": 3080.0, "target": 3600, "songs": [("A song", 242.0)]})
         window.step_starts("mp3")
+        window.wave_card.show()
+        window.wave.set_levels([abs((i * 37) % 100 - 50) / 50 for i in range(600)])
+        window.wave.set_length(4440.0)
+        window.wave.set_cut("start", 542.0)
+        window.wave.set_cut("end", 4095.0)
         for key, _text in PAGES:
             window.show_page(key, models=False)  # (looking for the models makes the models folder)
             if window.pages.currentIndex() != [k for k, _t in PAGES].index(key):

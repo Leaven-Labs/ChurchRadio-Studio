@@ -73,6 +73,7 @@ QPushButton:disabled {{ color: {c['disabled']}; }}
 QPushButton#primary {{ background: {c['accent']}; border: 1px solid {c['accent2']}; color: white; font-weight: 600; }}
 QPushButton#primary:hover {{ background: {c['accent2']}; }}
 QPushButton#primary:disabled {{ background: {c['line']}; border-color: {c['line']}; color: {c['disabled']}; }}
+QPushButton#mini {{ padding: 3px 9px; font-size: 12px; border-radius: 6px; }}
 QPushButton#ghost {{ border: none; background: transparent; color: {c['sub']}; }}
 QPushButton#ghost:hover {{ color: {c['text']}; }}
 QFrame#segs {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px; }}
@@ -390,6 +391,179 @@ class HourBar(QWidget):
                 p.setPen(QColor("white"))
                 p.drawText(part.adjusted(14, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
             x += w + gap
+
+
+def clock(sec):
+    """A place in a recording or a length: "9:02", "1:08:15"."""
+    sec = int(round(sec))
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
+
+
+class Waveform(QWidget):
+    """The recording drawn as its loudness along its length, with the two cuts marked: the part
+    that is broadcast is bright, what is cut off before the start and after the end is dim."""
+    TOP, BOTTOM = 30, 24  # room for the cut labels above the wave and the times under it
+    GRAB = 9              # a click this many pixels from a cut's line takes hold of it
+    APART = 30.0          # the cuts stay at least this many seconds apart
+    moved = Signal(str)   # the person moved a cut ("start" or "end"): with the mouse, or nudge()
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(self.TOP + 72 + self.BOTTOM)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
+        self.editable, self.drag = False, None
+        self.reset()
+
+    def reset(self):
+        """A new recording: nothing is known yet."""
+        self.levels, self.length, self.cuts, self.note = None, 0.0, {}, "Reading the recording ..."
+        self.drag = None
+        self.update()
+
+    def known(self):
+        """True once the length and both cuts are known: the cuts can be shown and moved."""
+        return self.length > 0 and "start" in self.cuts and "end" in self.cuts
+
+    def set_editable(self, on):
+        """Let the person drag the cuts (not while a broadcast is being made)."""
+        self.editable = bool(on)
+        if not on:
+            self.drag = None
+            self.unsetCursor()
+
+    def cut_x(self, which):
+        """Where the line of a cut is drawn (a cut that cuts nothing: at that end of the picture)."""
+        at = self.cuts.get(which)
+        if which == "start":
+            return self.width() * min(max((at or 0.0) / self.length, 0.0), 1.0) if self.length else 0.0
+        return self.width() * min(max(at / self.length, 0.0), 1.0) if at and self.length else float(self.width())
+
+    def move_cut(self, which, seconds):
+        """Put a cut at `seconds`, kept inside the recording and apart from the other cut. At the
+        very start or end of the recording the cut cuts nothing (None)."""
+        if not self.known():
+            return
+        if which == "start":
+            limit = (self.cuts.get("end") or self.length) - self.APART
+            at = round(min(max(seconds, 0.0), max(limit, 0.0)), 1)
+            self.cuts["start"] = at or None
+        else:
+            at = round(max(min(seconds, self.length), (self.cuts.get("start") or 0.0) + self.APART), 1)
+            self.cuts["end"] = None if at >= self.length else at
+        self.update()
+
+    def nudge(self, which, seconds):
+        """Move a cut a little earlier (-) or later (+)."""
+        if self.editable and self.known():
+            now = self.cuts.get(which)
+            self.move_cut(which, (now if now is not None else 0.0 if which == "start" else self.length) + seconds)
+            self.moved.emit(which)
+
+    def cut_near(self, x):
+        """The cut whose line is at x (within GRAB), or None."""
+        if not (self.editable and self.known()):
+            return None
+        near = sorted((abs(x - self.cut_x(which)), which) for which in ("start", "end"))
+        return near[0][1] if near[0][0] <= self.GRAB else None
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self.drag = self.cut_near(event.position().x())
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        x = event.position().x()
+        if self.drag and self.width():
+            self.move_cut(self.drag, x / self.width() * self.length)
+        elif self.cut_near(x):
+            self.setCursor(Qt.SizeHorCursor)
+        else:
+            self.unsetCursor()
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        if self.drag and event.button() == Qt.LeftButton:
+            which, self.drag = self.drag, None
+            self.moved.emit(which)
+
+    def set_levels(self, levels):
+        """levels: numbers 0..1 along the recording (audio.loudness_outline), or None if it failed."""
+        self.levels = levels or None
+        self.note = "" if levels else "The recording could not be drawn. The broadcast is not affected."
+        self.update()
+
+    def set_length(self, seconds):
+        self.length = max(0.0, seconds or 0.0)
+        self.update()
+
+    def set_cut(self, which, seconds):
+        """which: "start" or "end". seconds into the recording; None or 0 = nothing cut there."""
+        self.cuts[which] = seconds or None
+        self.update()
+
+    def steps(self):
+        """The times written under the wave: at most six, at round minutes."""
+        for minutes in (1, 2, 5, 10, 15, 30, 60, 120):
+            if self.length / (minutes * 60) <= 5.5:
+                return [t * minutes * 60 for t in range(int(self.length // (minutes * 60)) + 1)]
+        return [0]
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, mid_h = float(self.width()), self.height() - self.TOP - self.BOTTOM
+        wave = QRectF(0, self.TOP, w, mid_h)
+        length = self.length
+        x_of = (lambda sec: w * min(max(sec / length, 0.0), 1.0)) if length else (lambda sec: 0.0)
+        start, end, known = self.cut_x("start"), self.cut_x("end"), bool(length) and bool(self.cuts)
+
+        for part in ((0.0, start), (end, w)) if known else ():  # what is cut off: a darker ground
+            if part[1] - part[0] > 0.5:
+                p.fillRect(QRectF(part[0], self.TOP, part[1] - part[0], mid_h), QColor(colors["bg"]))
+        p.setPen(Qt.NoPen)
+        if self.levels:
+            n, x, cy = len(self.levels), 1.0, wave.center().y()
+            while x < w - 1:
+                level = self.levels[min(n - 1, int(x / w * n))]
+                h = max(2.0, level * (mid_h - 8))
+                inside = not known or start <= x <= end
+                p.setBrush(QColor(colors["accent" if inside else "disabled"]))
+                p.setOpacity(1.0 if inside else 0.55)
+                p.drawRoundedRect(QRectF(x, cy - h / 2, 2, h), 1, 1)
+                x += 4
+            p.setOpacity(1.0)
+        else:
+            p.setPen(QColor(colors["sub"]))
+            p.drawText(wave, Qt.AlignCenter, self.note)
+
+        font = QFont(self.font())
+        font.setBold(True)
+        if known:  # the two cuts: a line through the wave and a label above it
+            for which, x, name in (("start", start, "Start"), ("end", end, "End")):
+                at = self.cuts.get(which)
+                text = f"{name} {clock(at)}" if at else f"{name}: nothing cut"
+                p.setFont(font)
+                tw = p.fontMetrics().horizontalAdvance(text) + 18
+                left = min(max(x - 1 if which == "start" else x + 1 - tw, 0.0), w - tw)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(colors["accent"]))
+                p.drawRoundedRect(QRectF(left, 0, tw, 22), 5, 5)
+                p.drawRect(QRectF(min(max(x - 1, 0.0), w - 2), 20, 2, self.height() - self.BOTTOM - 20))
+                p.setPen(QColor("white"))
+                p.drawText(QRectF(left, 0, tw, 22), Qt.AlignCenter, text)
+
+        if length:  # the times under the wave; the last one is the length of the recording
+            p.setFont(self.font())
+            p.setPen(QColor(colors["sub"]))
+            fm, y = p.fontMetrics(), self.height() - self.BOTTOM + 6
+            last = clock(length)
+            last_x = w - fm.horizontalAdvance(last)
+            p.drawText(QRectF(last_x, y, w - last_x, 18), Qt.AlignLeft | Qt.AlignVCenter, last)
+            for sec in self.steps():
+                text = clock(sec)
+                tw = fm.horizontalAdvance(text)
+                x = min(max(x_of(sec) - (tw / 2 if sec else 0), 0.0), w - tw)
+                if x + tw + 14 < last_x:
+                    p.drawText(QRectF(x, y, tw + 2, 18), Qt.AlignLeft | Qt.AlignVCenter, text)
 
 
 class StepMark(QWidget):

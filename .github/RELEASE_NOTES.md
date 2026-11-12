@@ -10,15 +10,16 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.1.1
+## What's new in 1.2.0
 
-- **One window, with a menu at the left.** Broadcast, Songs, History and Settings are now pages of the main window. Songs and Settings no longer open as separate windows. (The setup wizard of the first start still does.)
-- **Broadcast page.** **Progress** ticks off each step and shows where the start and the end were cut and how much silence was taken out. **The hour** shows the intro, the service and the chosen songs as one bar, to scale, with the songs and their lengths. The log is under **Show the details**; it opens by itself if a broadcast fails.
-- **Songs page.** A switch turns a song on or off, a round button plays it, and the **May broadcast** column says **Public domain**, **Allowed**, **Needs permission**, **Check** or **Not found** (before: Yes, Allowed, No, Check, ?). Select a song to see its file, the words heard and the reason under the list, with **Rename**, **Seasons**, **Identify** and **Add permission**. A right-click on the list has every action. The **Words** and **File** columns are gone from the table.
-- **History page (new).** The broadcasts you made, with their songs: **Play** one or **Show in folder**.
-- **Settings page.** All settings on one page; click **Save** at the top.
-- Songs and Settings are shut while a broadcast is being made.
+- **See where the service is cut.** The Broadcast page draws the recording by its loudness, with the start and the end cut marked: the bright part is broadcast, the dim parts before and after are cut off.
+- **Hear the cuts.** **Play from start cut** and **Play to end cut** play the 12 seconds the service will start and end with.
+- **Fix a cut that is wrong.** Drag a marker in the picture, or use the small buttons under it (−5 s, −1 s, +1 s, +5 s), then click **Make the broadcast again**. The MP3 is made again with your cuts, without listening for the words a second time, and replaces the first one.
+- **Check first, if you like.** Tick **Check the cuts before the MP3 is written** and the app finds the cuts and waits for you to click **Make the broadcast**. It is off unless you tick it, and the tick is remembered.
+- **Time left.** While the MP3 is written, the bar fills and Progress says about how long is left.
+- The Broadcast page scrolls on a low screen. The line that explains **Start** is hidden once a recording is chosen; it is still the tooltip of the Start box.
+- **Linux:** the play buttons use `paplay`, `pw-play`, `aplay` or `ffplay`, whichever is installed (most desktops have one).
 
-Nothing changes in how the broadcast is made, in your settings and song list, or in `--build` for Task Scheduler, cron and launchd.
+Nothing changes in your settings and song list, or in `--build` for Task Scheduler, cron and launchd: scheduled runs never wait for a check.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

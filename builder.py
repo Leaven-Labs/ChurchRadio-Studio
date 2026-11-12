@@ -90,14 +90,16 @@ def load_history():
     return [e for e in hist if isinstance(e, dict)] if isinstance(hist, list) else []
 
 
-def recent_songs(weeks):
-    hist = load_history()
+def recent_songs(weeks, not_output=None):
+    """The songs of the last broadcasts. not_output: leave out the broadcast saved there (it is
+    being made again: its own songs may be chosen again)."""
+    hist = [e for e in load_history() if not not_output or e.get("output") != not_output]
     hist = hist[-weeks:] if weeks > 0 else []
     return {s for entry in hist for s in entry.get("songs", [])}
 
 
 def save_history(date, songs, output):
-    hist = load_history()
+    hist = [e for e in load_history() if e.get("output") != output]  # made again: one line, not two
     hist.append({"date": date.isoformat(), "output": output, "songs": songs})
     with open(_history_path(), "w", encoding="utf-8") as fh:
         json.dump(hist[-52:], fh, indent=1)
@@ -155,6 +157,20 @@ def find_service_end(service, cfg, start, log=print):
     return end
 
 
+def find_cuts(service, cfg=None, start_mode=None, cut_end=True, log=print, tell=None):
+    """Listen for where the service starts and ends. Returns (start, end): seconds into the
+    recording; end None = nothing is cut at the end. tell: as in build."""
+    tell = tell or (lambda what, value: None)
+    cfg = cfg or load_config()
+    start = find_service_start(service, cfg, start_mode or cfg.get("service_start", "Auto"), log)
+    tell("start", start)
+    end = find_service_end(service, cfg, start, log) if cut_end else None
+    if not cut_end:
+        log("Service end: nothing cut at the end.")
+    tell("end", end)
+    return start, end
+
+
 def overlong_warning(intro_len, svc_len, target=3600, tol=30):
     """Warning text when intro + service is longer than target + tol, else None."""
     over = intro_len + svc_len - target
@@ -169,16 +185,19 @@ def overlong_warning(intro_len, svc_len, target=3600, tol=30):
 
 
 def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, cut_end=True,
-          compress=True, tell=None):
+          compress=True, tell=None, cuts=None):
     """Make the broadcast MP3. Returns the output path.
 
     warn(msg) is called when the result needs a manual edit (too long).
     cut_end: cut everything after the congregation's "Thanks be to God" (see find_service_end).
     compress: put the broadcast compressor on the final MP3.
+    cuts: (start, end) in seconds into the recording, set by the person in the window (end None =
+    nothing cut at the end). The app then does not listen for the start and end itself
+    (start_mode and cut_end are not used).
     tell(what, value) is called with the numbers the window shows as they become known:
     "start" and "end" (the cuts, seconds into the recording; end None = nothing cut), "silence"
-    (seconds of long silences cut) and "hour" (a dict: the lengths of the intro and the service,
-    the songs as (title, seconds), and the target).
+    (seconds of long silences cut), "hour" (a dict: the lengths of the intro and the service,
+    the songs as (title, seconds), and the target) and "mp3" (how much of the MP3 is written, 0 to 1).
     """
     tell = tell or (lambda what, value: None)
     cfg = cfg or load_config()
@@ -198,12 +217,16 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
     out = os.path.join(out_dir, output_name(cfg, date))
 
     with tempfile.TemporaryDirectory(prefix="churchradio_") as tmp:
-        start = find_service_start(service, cfg, start_mode or cfg.get("service_start", "Auto"), log)
-        tell("start", start)
-        end = find_service_end(service, cfg, start, log) if cut_end else None
-        if not cut_end:
-            log("Service end: nothing cut at the end.")
-        tell("end", end)
+        if cuts is None:
+            start, end = find_cuts(service, cfg, start_mode, cut_end, log, tell)
+        else:
+            start, end = max(0.0, float(cuts[0] or 0.0)), cuts[1]
+            if end is not None and end <= start:
+                raise RuntimeError("The end cut is before the start cut.")
+            log(f"Cuts set by hand: the service starts at {audio.fmt(start)} and ends at "
+                + (audio.fmt(end) if end is not None else "the end of the recording") + ".")
+            tell("start", start)
+            tell("end", end)
         log("Cutting long silences from the service ...")
         svc = os.path.join(tmp, "service.wav")
         svc_len = audio.trim_service(service, svc, cfg.get("max_silence_seconds", 5),
@@ -242,7 +265,7 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
             log(f"{len(pool)} songs allowed ({seasonal} for {label}, "
                 f"{len(pool) - seasonal} general)")
             chosen, total = picker.pick_songs(pool, need, tol,
-                                              recent=recent_songs(cfg.get("avoid_repeat_weeks", 4)))
+                                              recent=recent_songs(cfg.get("avoid_repeat_weeks", 4), not_output=out))
             for s in chosen:
                 folder = os.path.basename(os.path.dirname(s["path"]))
                 title = f" - {s['title']}" if s.get("title") else ""
@@ -269,9 +292,11 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
         parts = ([intro] if intro else []) + [(svc, 0.0, svc_end)] + \
             [(s["path"], s["start"], s["end"]) for s in chosen]
         name = (cfg.get("broadcast_name") or DEFAULT_NAME).strip()
+        whole = intro_len + svc_end + sum(s["duration"] for s in chosen)
         length = audio.join_to_mp3(parts, out,
                                    cfg.get("mp3_bitrate", "192k"),
-                                   {"title": f"{name} Broadcast {date:%m/%d/%Y}"}, comp)
+                                   {"title": f"{name} Broadcast {date:%m/%d/%Y}"}, comp,
+                                   progress=(lambda sec: tell("mp3", min(1.0, sec / whole))) if whole > 0 else None)
     save_history(date, [s["path"] for s in chosen], out)
     log(f"Done: {out} ({audio.fmt(length)})")
     return out

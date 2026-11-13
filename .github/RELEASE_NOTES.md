@@ -10,16 +10,15 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.2.0
+## What's new in 1.3.0
 
-- **See where the service is cut.** The Broadcast page draws the recording by its loudness, with the start and the end cut marked: the bright part is broadcast, the dim parts before and after are cut off.
-- **Hear the cuts.** **Play from start cut** and **Play to end cut** play the 12 seconds the service will start and end with.
-- **Fix a cut that is wrong.** Drag a marker in the picture, or use the small buttons under it (−5 s, −1 s, +1 s, +5 s), then click **Make the broadcast again**. The MP3 is made again with your cuts, without listening for the words a second time, and replaces the first one.
-- **Check first, if you like.** Tick **Check the cuts before the MP3 is written** and the app finds the cuts and waits for you to click **Make the broadcast**. It is off unless you tick it, and the tick is remembered.
-- **Time left.** While the MP3 is written, the bar fills and Progress says about how long is left.
-- The Broadcast page scrolls on a low screen. The line that explains **Start** is hidden once a recording is chosen; it is still the tooltip of the Start box.
-- **Linux:** the play buttons use `paplay`, `pw-play`, `aplay` or `ffplay`, whichever is installed (most desktops have one).
+- **Cancel.** A **Cancel** button next to the progress bar stops a broadcast that is being made, at once or after a few seconds. Nothing is saved, and cuts that were already found are kept.
+- **The finished broadcast on the page.** Instead of a pop-up, a card shows the MP3 with its length and folder, with **Play** and **Show in folder**. If the broadcast is too long, the card says by how much.
+- **Close-ups of the cuts.** Under the picture of the recording, each cut is shown from near (the 40 seconds around it). Click or drag there to put a cut in the pause between two words, exact to a tenth of a second.
+- **The date in the file name.** **Settings → Your broadcast → Date in the file name**: choose **Short** (`2026-11-15`, `11-15-2026`, `15.11.2026`, `20261115` and more) or **Long** (`November 15, 2026`, `15 Nov 2026`, `Sunday, November 15, 2026` and more). The file name stays as it was until you change it.
+- **The MP3's title now writes the date the same way as the file name**: `Church Radio Broadcast 2026-11-15`, where it was `11/15/2026`.
+- **No half-written MP3.** The MP3 gets its name only when it is whole. A run that fails or is stopped leaves no file that a scheduled run would take for a finished broadcast, and does not damage the broadcast made before.
 
-Nothing changes in your settings and song list, or in `--build` for Task Scheduler, cron and launchd: scheduled runs never wait for a check.
+If the computer makes the broadcast by itself (`--build`): it knows a broadcast is made by its file name. After you change the date format, the next run makes the newest recording's broadcast once more, under the new name.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

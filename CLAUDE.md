@@ -57,8 +57,10 @@ the maintainer asks what to build next. Remove an item once it is built.
 - **Public-domain status does not affect what is broadcast.** `catalog.songs_for` ignores
   `catalog.cleared()`. Add a setting "only use songs that are allowed to broadcast", or say in the
   README that the status is only a guide.
-- Pin the build inputs: versions in `requirements.txt`, the BtbN ffmpeg build (verify its hash), and
-  the GitHub Actions by commit.
+- Pin the BtbN ffmpeg build for Windows and Linux and verify its hash (the rest is pinned:
+  `requirements.txt`, `requirements-build.txt`, the Actions by commit, the Mac's ffmpeg and lame
+  sources by SHA-256; `.github/dependabot.yml` proposes updates). BtbN's `latest` changes daily, so
+  pin a dated build or build ffmpeg from source as the Mac job does (also the smaller download).
 - `builder.recent_songs` counts history entries, not weeks: filter by date. Write `history.json`
   atomically, as `save_config` does.
 - `audio.trim_service` does not check that the silence-detect pass worked.

@@ -19,9 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # contents:write lets a release run create the tag + GitHub release. A PR run only
-  # builds/tests/smokes (no release step) and the token is read-only there, so this is safe.
-  contents: write
+  # The builds only read the repository. The release job alone may write (see there).
+  contents: read
 
 jobs:
   windows:
@@ -33,10 +32,10 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -45,8 +44,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          python -m pip install -r requirements.txt -r requirements-build.txt
 
       - name: Run unit tests (stop if any fail)
         shell: pwsh
@@ -292,7 +290,7 @@ jobs:
           Write-Host "Update test PASS: moved out of the old-name folder, shortcut, settings and song list kept."
 
       - name: Upload the installer as artifact (for pre-release inspection)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: churchradio-studio-windows
           path: dist/ChurchRadio-Studio-Setup.exe
@@ -313,10 +311,10 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -333,8 +331,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          python -m pip install -r requirements.txt -r requirements-build.txt
 
       - name: Run unit tests (stop if any fail)
         run: python -m unittest discover -s tests -v
@@ -416,7 +413,7 @@ jobs:
           test -f "$HOME/.config/churchradio-studio/config.json" || { echo "Uninstall removed the settings."; exit 1; }
 
       - name: Upload the .tar.gz as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: churchradio-studio-linux
           path: dist/ChurchRadio-Studio-Linux-x86_64.tar.gz
@@ -437,14 +434,17 @@ jobs:
       PYTHONUNBUFFERED: "1"
       FFMPEG_VERSION: "7.1.1"
       LAME_VERSION: "3.100"
+      # SHA-256 of the two source downloads. With a new version above, put its SHA-256 here.
+      FFMPEG_SHA256: "733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"
+      LAME_SHA256: "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
       MACOSX_DEPLOYMENT_TARGET: "14.0"  # onnxruntime and PyAV need macOS 14
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -452,8 +452,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller pillow
+          python -m pip install -r requirements.txt -r requirements-build.txt
 
       - name: Run unit tests (stop if any fail)
         run: python -m unittest discover -s tests -v
@@ -472,10 +471,10 @@ jobs:
 
       - name: Cached ffmpeg build
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: build/ffmpeg-mac
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}-lame-${{ env.LAME_VERSION }}-macos14-arm64-v1
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-lame-${{ env.LAME_VERSION }}-macos14-arm64-v2
 
       - name: Build ffmpeg (LGPL, with LAME for MP3)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -486,7 +485,8 @@ jobs:
           cd "$src"
           curl -fsSL --retry 5 -o lame.tar.gz "https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz"
           curl -fsSL --retry 5 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-          shasum -a 256 lame.tar.gz ffmpeg.tar.xz
+          # Stop if a download is not the file that is expected.
+          printf '%s  %s\n' "$LAME_SHA256" lame.tar.gz "$FFMPEG_SHA256" ffmpeg.tar.xz | shasum -a 256 -c -
           tar -xzf lame.tar.gz && tar -xJf ffmpeg.tar.xz
           cd "lame-$LAME_VERSION"
           sed -i '' '/lame_init_old/d' include/libmp3lame.sym   # the known macOS link fix (as Homebrew does)
@@ -573,7 +573,7 @@ jobs:
             "$HOME/Library/Application Support/ChurchRadio Studio" "/Users/Shared/ChurchRadio Studio/models" "$CRS_VERSION"
 
       - name: Upload the .dmg as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: churchradio-studio-macos
           path: dist/ChurchRadio-Studio-macOS.dmg
@@ -589,15 +589,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # creates the tag and the GitHub release
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Get the three builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           path: dist
           pattern: churchradio-studio-*

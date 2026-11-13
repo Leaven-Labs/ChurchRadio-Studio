@@ -1,0 +1,13 @@
+# What the release build needs on top of requirements.txt: PyInstaller (makes the program) and,
+# on a Mac, Pillow (makes the icon). Exact versions, as in requirements.txt.
+# To work the list out again (after requirements.txt):
+#   printf 'pyinstaller\npillow; sys_platform == "darwin"\n' | uv pip compile - -c requirements.txt --universal --python-version 3.12 --no-header --no-annotate
+altgraph==0.17.5
+macholib==1.16.4 ; sys_platform == 'darwin'
+packaging==26.3
+pefile==2024.8.26 ; sys_platform == 'win32'
+pillow==13.0.0 ; sys_platform == 'darwin'
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
+setuptools==84.2.1

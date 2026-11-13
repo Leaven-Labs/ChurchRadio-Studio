@@ -1,6 +1,7 @@
 {
   "setup_done": false,
   "broadcast_name": "Church Radio",
+  "date_format": "YYYY-MM-DD",
   "intro": "",
   "song_folders": [],
   "output_folder": "",

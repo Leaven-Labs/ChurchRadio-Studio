@@ -103,7 +103,7 @@ A short wizard sets the app up for your church. You can change everything later 
 
 1. **Welcome.**
 2. **Broadcast** — your program's name (used in the file name, e.g. `St. John Radio 2026-11-15.mp3`),
-   the broadcast length, how far over it may run, and where to save the MP3 (empty = next to the
+   how the date is written in it ([short or long](#the-date-in-the-file-name)), the broadcast length, how far over it may run, and where to save the MP3 (empty = next to the
    recording).
 3. **Intro** — the intro that plays first (with **Play**), or none.
 4. **Songs** — the folders that hold your songs (folders inside them are included).
@@ -124,7 +124,12 @@ A short wizard sets the app up for your church. You can change everything later 
    marked: the bright part is broadcast, the dim parts before and after are cut off.
    While the MP3 is written, Progress says about how long is left.
    **Show the details** shows everything the app wrote while it worked.
-4. The app tells you where the MP3 was saved.
+4. When it is done, a card at the top shows the MP3 with its length and folder: **Play** it, or
+   **Show in folder**.
+
+**Cancel**, next to the progress bar, stops a broadcast that is being made (the wrong recording, the
+wrong date). It stops at once or after a few seconds. Nothing is saved, and a broadcast made before
+is left as it was. Cuts that were already found are kept: click **Make the broadcast** to use them.
 
 **If a cut is wrong.** Once the cuts are found you can check and move them:
 
@@ -133,6 +138,9 @@ A short wizard sets the app up for your church. You can change everything later 
 - **Drag a marker** in the picture to move a cut, or use the small buttons under it (**−5 s**, **−1 s**,
   **+1 s**, **+5 s**; the left four move the start, the right four the end). A marker dragged to the
   very start or end of the recording cuts nothing there.
+- **Place a cut exactly** in the two **close-ups** under the picture. Each shows the 40 seconds around
+  one cut, so the pauses between words can be seen. Click where the cut should be, or drag it; the
+  time at the right is exact to a tenth of a second.
 - Click **Make the broadcast again**: the MP3 is made again with your cuts (the app does not listen
   for the words again, so this is quick) and replaces the first one.
 
@@ -159,7 +167,35 @@ used — `10.11.2026`, `10-11-2026` (month first) or `2026-10-11`.
 - **Compress the final MP3** — untick to skip the broadcast compressor.
 
 **Too long?** If the intro and service alone are longer than the broadcast, no songs are added. The
-MP3 is still saved, with a warning saying by how much, so you can trim it by hand (e.g. in Audacity).
+MP3 is still saved, and the card that shows it says by how much it is too long, so you can trim it by
+hand (e.g. in Audacity).
+
+### The date in the file name
+
+**Settings → Your broadcast → Date in the file name** sets how the service date is written in the
+MP3's file name and in its title. Choose **Short** or **Long**, then one of the ways to write it
+(shown here for November 15, 2026):
+
+| Short | Long |
+|---|---|
+| `2026-11-15` (as before; files sort by date) | `November 15, 2026` |
+| `11-15-2026` | `15 November 2026` |
+| `15-11-2026` | `Sunday, November 15, 2026` |
+| `11.15.2026` | `Sunday 15 November 2026` |
+| `15.11.2026` | `Nov 15, 2026` |
+| `2026.11.15` | `15 Nov 2026` |
+| `11-15-26` | `Sun, Nov 15, 2026` |
+| `20261115` | |
+
+The line under the boxes shows the file name you will get. Broadcasts already made keep their
+names. If the computer makes the broadcast [by itself](#making-it-automatically-task-scheduler), it
+knows a broadcast is made by its file name: after you change the date format, the next scheduled run
+makes the newest recording's broadcast once more, under the new name.
+
+Another way to write it can be typed as `date_format` in `config.json`, from these parts: `YYYY`
+2026, `YY` 26, `MMMM` November, `MMM` Nov, `MM` 11, `M` 11 (3 for March), `DD` 05, `D` 5, `dddd`
+Sunday, `ddd` Sun. Signs a file name cannot hold (such as `/`) become `-` in the file name and stay
+in the title.
 
 ## Making it automatically (Task Scheduler)
 
@@ -406,6 +442,7 @@ Most settings are on the **Settings** page (click **Save** at the top when you h
 | Setting | Default | What it does |
 |---|---|---|
 | `broadcast_name` | `Church Radio` | Name in the MP3 file name and title. |
+| `date_format` | `YYYY-MM-DD` | How the service date is written in the MP3 file name and title: see [The date in the file name](#the-date-in-the-file-name). |
 | `intro` | (none) | The intro file. Empty = no intro. |
 | `song_folders` | (none) | Folders with your songs (folders inside them are included). |
 | `output_folder` | (none) | Where to save the MP3. Empty = next to the recording. |
@@ -558,14 +595,14 @@ release with the three downloads and `SHA256SUMS.txt`.
 | `app.py` | Starts the app: the window, or `--build` / `--selftest` / `--uitest` from the command line. |
 | `mainwindow.py` | The main window: the menu at the left, the Broadcast and History pages. |
 | `player.py` | Plays a piece of the recording (the cuts) with the system's own sound player. |
-| `ui.py` | The look: light and dark colours, the style sheet, the service date box. |
+| `ui.py` | The look: light and dark colours, the style sheet, the service date box, the picture of the recording and the close-ups of the cuts. |
 | `cli.py` | `--build`: making the broadcast with no window, for Task Scheduler. |
 | `setup_wizard.py` | The settings: the setup wizard and the Settings page. |
 | `songs_window.py` | The Songs page. |
 | `add_songs.py` | Add songs / Identify: the review table and saving. |
 | `builder.py` | Makes one broadcast: intro + service + songs. |
 | `prelude.py` | Speech recognition: finding the start and end of the service. |
-| `audio.py` | ffmpeg: lengths, silence, trimming, joining, compression. |
+| `audio.py` | ffmpeg: lengths, silence, trimming, joining, compression; stopping the work (Cancel). |
 | `picker.py` | Picks the songs that fill the time. |
 | `catalog.py` | The song list (`songs.csv`), seasons, songs with no words, importing a song list. |
 | `pdlookup.py` | The public-domain lookup (Wikidata, then the app's hymn list). |

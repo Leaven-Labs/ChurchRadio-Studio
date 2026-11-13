@@ -155,6 +155,7 @@ class SettingsForm(QWidget):
         if intro and not os.path.isfile(intro):
             raise ValueError(f"The intro file was not found:\n{intro}")
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
+                 date_format=self.date_format.currentData() or builder.DATE_FORMAT,
                  output_folder=self.output.text().strip(), intro=intro,
                  theme=ui.THEMES[self.theme.currentIndex()],
                  song_folders=list(self.folders),
@@ -222,14 +223,38 @@ class SettingsForm(QWidget):
 
     def page_broadcast(self):
         c = self.cfg
-        self.heading("Your broadcast", "The name is used for the MP3 file and its title, "
-                     'for example "St. John Radio 2026-11-15.mp3". Use your station\'s or '
-                     "program's name.")
+        self.heading("Your broadcast", "The name is used for the MP3 file and its title, with the service "
+                     "date after it. Use your station's or program's name.")
         self.name = QLineEdit(c.get("broadcast_name") or builder.DEFAULT_NAME)
         self.minutes = QLineEdit(str(c.get("target_minutes", 60)))
         self.tolerance = QLineEdit(str(c.get("tolerance_seconds", 30)))
         self.output = QLineEdit(c.get("output_folder", ""))
         self.row("Broadcast name:", self.name, width=240)
+        # The date in the file name and title: short (numbers) or long (the month as a word), and
+        # the ways to write each. A format typed in config.json is listed too.
+        fmt = builder.date_format(c)
+        self.date_style = ui.Segments([style for style, _formats in builder.DATE_FORMATS])
+        self.date_format = QComboBox()
+        self.date_format.setFixedWidth(240)
+        self.date_formats = {style: list(formats) for style, formats in builder.DATE_FORMATS}
+        if fmt not in self.date_formats[builder.date_style(fmt)]:
+            self.date_formats[builder.date_style(fmt)].append(fmt)
+        holder = QWidget()
+        line = QHBoxLayout(holder)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(10)
+        line.addWidget(self.date_style)
+        line.addWidget(self.date_format)
+        line.addStretch()
+        self.row("Date in the file name:", holder)
+        self.name_example = ui.label("", "hint")
+        self.body.addWidget(self.name_example)
+        self.body.addSpacing(6)
+        self.date_style.set_current(builder.date_style(fmt))
+        self.show_date_formats(fmt)
+        self.date_style.changed.connect(lambda _style: self.show_date_formats())
+        self.date_format.currentIndexChanged.connect(lambda _i: self.show_name_example())
+        self.name.textChanged.connect(lambda _text: self.show_name_example())
         self.row("Length (minutes):", self.minutes, width=70)
         self.row("May run over by (seconds):", self.tolerance, "songs never go past this", width=70)
         line = self.row("Save the MP3 in:", self.output)
@@ -241,6 +266,22 @@ class SettingsForm(QWidget):
         theme = c.get("theme", "auto")
         self.theme.setCurrentIndex(ui.THEMES.index(theme) if theme in ui.THEMES else 0)
         self.row("The app's look:", self.theme, "light or dark", width=200)
+
+    def show_date_formats(self, chosen=None):
+        """List the date formats of the style chosen (Short or Long), each as the example date."""
+        box = self.date_format
+        box.blockSignals(True)
+        box.clear()
+        for fmt in self.date_formats[self.date_style.current()]:
+            box.addItem(builder.format_date(builder.EXAMPLE_DATE, fmt), fmt)
+        box.setCurrentIndex(max(0, box.findData(chosen)) if chosen else 0)
+        box.blockSignals(False)
+        self.show_name_example()
+
+    def show_name_example(self):
+        cfg = {"broadcast_name": self.name.text(), "date_format": self.date_format.currentData()}
+        self.name_example.setText(f'The MP3 is named "{builder.output_name(cfg, builder.EXAMPLE_DATE)}" '
+                                  "(for a service on November 15, 2026).")
 
     def pick_folder(self, field):
         d = QFileDialog.getExistingDirectory(self, "Folder", field.text())
@@ -429,6 +470,7 @@ class SettingsForm(QWidget):
         self.heading("All set", "Click Finish to save. Then drop the service recording on the window "
                      "to make the broadcast." if self.first_run else "Click Save to keep these settings.")
         lines = [f"Broadcast: {c['broadcast_name']}, {c['target_minutes']} minutes",
+                 f'MP3 file name: "{builder.output_name(c, builder.EXAMPLE_DATE)}" (for November 15, 2026)',
                  f"Intro: {c['intro'] or '(none)'}",
                  f"Song folders: {len(c['song_folders'])}",
                  f'Service starts at "{c["start_phrase"]}" and ends after "{c["end_answer_phrase"] or c["end_phrase"]}"',

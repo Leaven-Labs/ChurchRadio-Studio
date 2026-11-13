@@ -9,12 +9,12 @@ import os
 import platform
 import re
 import shutil
-import subprocess
-import sys
 import threading
 from difflib import SequenceMatcher
 
 import numpy as np
+
+from audio import check_stop
 
 SEARCH_MINUTES = 30   # only the start of the file is searched
 PAD_SEC = 0.3         # keep a little audio before the first word
@@ -416,13 +416,12 @@ def _read_audio(src, start=0.0, length=None, louder=False):
 
     louder: make quiet speech (the congregation far from the microphone) as loud as the rest.
     """
-    from audio import NO_WINDOW, find_tool
+    from audio import find_tool, run_tool
     seek = ["-ss", f"{start:.3f}"] if start > 0 else []
     span = ["-t", f"{length:.3f}"] if length else []
-    r = subprocess.run([find_tool("ffmpeg"), "-v", "error", "-nostdin"] + seek + span +
-                       ["-i", src, "-map", "0:a:0", "-vn"] + (["-af", "dynaudnorm=f=200:g=11"] if louder else []) +
-                       ["-f", "s16le", "-ar", str(RATE), "-ac", "1", "-"],
-                       capture_output=True, creationflags=NO_WINDOW)
+    r = run_tool([find_tool("ffmpeg"), "-v", "error", "-nostdin"] + seek + span +
+                 ["-i", src, "-map", "0:a:0", "-vn"] + (["-af", "dynaudnorm=f=200:g=11"] if louder else []) +
+                 ["-f", "s16le", "-ar", str(RATE), "-ac", "1", "-"], text=False)
     if r.returncode != 0 or not r.stdout:
         raise RuntimeError("Could not read audio for the phrase search.")
     return np.frombuffer(r.stdout, "<i2").astype(np.float32) / 32768.0
@@ -473,6 +472,7 @@ def analyse(src, phrase, search_minutes=SEARCH_MINUTES, models_folder="", log=No
 
     def words():
         for s in segs:
+            check_stop()
             for w in s.words or []:
                 heard.append((w.word, w.start, w.probability, w.end))
                 if state["gm"] is not None and w.start > state["gm"] + listen:
@@ -526,6 +526,7 @@ def count_words(src, duration, models_folder="", log=None):
     n = 0
     for start, length in spans:
         for s in _transcribe(_read_audio(src, start, length), models_folder, log=log):
+            check_stop()
             n += sum(1 for w in s.words or [] if _norm(w.word) and w.probability >= WORD_MIN_PROB)
     return n
 
@@ -544,6 +545,7 @@ def _hear_in_pieces(audio, offset, models_folder="", log=None):
         segs = _transcribe(piece, models_folder, END_MODEL_NAME, log=log,
                            no_speech_threshold=None, beam_size=5)
         for s in segs:
+            check_stop()
             for w in s.words or []:
                 if words and a + w.start < words[-1][1] - offset + 0.05:
                     continue  # already kept from the piece before

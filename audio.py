@@ -1,10 +1,12 @@
 """ffmpeg steps: read lengths, cut long silences, join parts into one MP3."""
+import contextlib
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
@@ -48,8 +50,89 @@ def find_tool(name):
     raise RuntimeError(f"{name} not found. {INSTALL_HINT[_platform()]}")
 
 
+# ---- stopping the work (Cancel in the window) ---------------------------------------------------
+class Stopped(BaseException):
+    """The person stopped the work. Not an Exception: the places that log a file's trouble and go on
+    to the next file (`except Exception`) must not go on."""
+
+
+class Stopper:
+    """Stops the work of one thread: stop() ends the ffmpeg that is running for it, and the work
+    then ends with Stopped at its next step. See stoppable()."""
+
+    def __init__(self):
+        self._stopped, self._lock, self._procs = threading.Event(), threading.Lock(), set()
+
+    def stopped(self):
+        return self._stopped.is_set()
+
+    def stop(self):
+        self._stopped.set()
+        with self._lock:
+            procs = list(self._procs)
+        for p in procs:
+            try:
+                p.kill()
+            except OSError:
+                pass  # it had just ended
+
+    def check(self):
+        if self._stopped.is_set():
+            raise Stopped("Stopped.")
+
+    def watch(self, proc):
+        with self._lock:
+            self._procs.add(proc)
+        if self._stopped.is_set():  # stopped between check() and here
+            self.stop()
+
+    def forget(self, proc):
+        with self._lock:
+            self._procs.discard(proc)
+
+
+_local = threading.local()
+
+
+@contextlib.contextmanager
+def stoppable(stopper):
+    """The work done by this thread inside the `with` can be stopped with stopper.stop()."""
+    _local.stopper = stopper
+    try:
+        yield stopper
+    finally:
+        _local.stopper = None
+
+
+def check_stop():
+    """Raise Stopped if this thread's work was stopped (called between the steps of long work)."""
+    stopper = getattr(_local, "stopper", None)
+    if stopper:
+        stopper.check()
+
+
+def run_tool(args, text=True):
+    """Run ffmpeg or ffprobe to its end and return what it wrote (.returncode, .stdout, .stderr).
+    Raises Stopped when the work was stopped: before it, while it ran (it is ended) or after it."""
+    stopper = getattr(_local, "stopper", None)
+    if stopper:
+        stopper.check()
+    how = {"text": True, "errors": "replace"} if text else {}
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=NO_WINDOW, **how)
+    if stopper:
+        stopper.watch(p)
+    try:
+        out, err = p.communicate()
+    finally:
+        if stopper:
+            stopper.forget(p)
+    if stopper:
+        stopper.check()
+    return subprocess.CompletedProcess(args, p.returncode, out, err)
+
+
 def _run(args):
-    p = subprocess.run(args, capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW)
+    p = run_tool(args)
     if p.returncode != 0:
         raise RuntimeError(f"{os.path.basename(args[0])} failed:\n{p.stderr[-1500:]}")
     return p
@@ -91,9 +174,8 @@ def trim_service(src, dst, max_silence=5.0, noise_db=-40, log=print, start_sec=0
     total = max(0.0, end - start_sec)
     seek = (["-ss", f"{start_sec:.3f}"] if start_sec > 0 else []) + \
         (["-t", f"{total:.3f}"] if end_sec is not None else [])
-    p = subprocess.run([ff, "-hide_banner", "-nostats"] + seek + ["-i", src, "-vn", "-af",
-                        f"silencedetect=noise={noise_db}dB:d={max_silence}", "-f", "null", "-"],
-                       capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW)
+    p = run_tool([ff, "-hide_banner", "-nostats"] + seek + ["-i", src, "-vn", "-af",
+                  f"silencedetect=noise={noise_db}dB:d={max_silence}", "-f", "null", "-"])
     ranges = keep_ranges(total, parse_silences(p.stderr), max_silence)
     cut = total - sum(b - a for a, b in ranges)
     log(f"Service: {fmt(total)}, cutting {cut:.1f} s of silence")
@@ -128,9 +210,8 @@ def edges_from(stderr, total, near=0.05, eof=0.5):
 def edge_silence(path, noise_db=EDGE_SILENCE_DB, min_sec=EDGE_MIN_SEC):
     """Seconds of silence at the start and at the end of a file: (lead, tail)."""
     total = duration(path)
-    p = subprocess.run([find_tool("ffmpeg"), "-hide_banner", "-nostats", "-i", path, "-vn", "-af",
-                        f"silencedetect=noise={noise_db}dB:d={min_sec}", "-f", "null", "-"],
-                       capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW)
+    p = run_tool([find_tool("ffmpeg"), "-hide_banner", "-nostats", "-i", path, "-vn", "-af",
+                  f"silencedetect=noise={noise_db}dB:d={min_sec}", "-f", "null", "-"])
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg could not read {os.path.basename(path)}")
     return edges_from(p.stderr, total)
@@ -178,19 +259,30 @@ def progress_seconds(line):
 
 
 def _run_with_progress(args, on_seconds):
-    """Run ffmpeg and call on_seconds(seconds written) as it works. Errors as _run."""
+    """Run ffmpeg and call on_seconds(seconds written) as it works. Errors and Stopped as _run."""
+    stopper = getattr(_local, "stopper", None)
+    if stopper:
+        stopper.check()
     with tempfile.TemporaryFile() as err:  # (a pipe nobody reads would fill up and stop ffmpeg)
         p = subprocess.Popen(args[:1] + ["-nostats", "-progress", "pipe:1"] + args[1:], stdout=subprocess.PIPE,
                              stderr=err, text=True, errors="replace", creationflags=NO_WINDOW)
-        with p.stdout:
-            for line in p.stdout:
-                sec = progress_seconds(line)
-                if sec is not None:
-                    try:
-                        on_seconds(sec)
-                    except Exception:  # noqa: BLE001  the window's trouble must not stop the MP3
-                        pass
-        p.wait()
+        if stopper:
+            stopper.watch(p)
+        try:
+            with p.stdout:
+                for line in p.stdout:
+                    sec = progress_seconds(line)
+                    if sec is not None:
+                        try:
+                            on_seconds(sec)
+                        except Exception:  # noqa: BLE001  the window's trouble must not stop the MP3
+                            pass
+            p.wait()
+        finally:
+            if stopper:
+                stopper.forget(p)
+        if stopper:
+            stopper.check()
         if p.returncode != 0:
             err.seek(0)
             raise RuntimeError(f"{os.path.basename(args[0])} failed:\n"
@@ -204,6 +296,9 @@ def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None, progres
     to the end): the silence at the start and end of a song is cut so the parts play back to back.
     compression: dict that changes COMPRESSION (for example {"enabled": False}).
     progress(seconds): called while ffmpeg works with the seconds of the MP3 written so far.
+
+    The MP3 is written under another name (dst + ".part") and gets its own name only when it is
+    whole: a run that fails or is stopped leaves no half MP3 that looks like a finished broadcast.
     """
     ff = find_tool("ffmpeg")
     args = [ff, "-y", "-hide_banner"]
@@ -219,10 +314,22 @@ def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None, progres
              "-map", "[out]", "-c:a", "libmp3lame", "-b:a", bitrate]
     for k, v in (meta or {}).items():
         args += ["-metadata", f"{k}={v}"]
-    if progress:
-        _run_with_progress(args + [dst], progress)
-    else:
-        _run(args + [dst])
+    part = dst + ".part"
+    try:
+        if progress:
+            _run_with_progress(args + ["-f", "mp3", part], progress)
+        else:
+            _run(args + ["-f", "mp3", part])
+        try:
+            os.replace(part, dst)
+        except PermissionError:  # Windows: the MP3 made before is open in a player
+            raise RuntimeError(f"Could not replace {dst}\nIt is open in another program (a music player?). "
+                               "Close it there and make the broadcast again.") from None
+    finally:
+        try:
+            os.remove(part)  # only there when it failed or was stopped
+        except OSError:
+            pass
     return duration(dst)
 
 
@@ -233,22 +340,39 @@ def cut_clip(src, dst, start, seconds):
     return dst
 
 
-def loudness_outline(path, buckets=600, rate=2000):
-    """How loud the recording is along its length, for drawing it: `buckets` numbers from 0 to 1.
+DETAIL_PER_SECOND = 20  # the close-ups of the cuts: this many loudness numbers for each second
 
-    ffmpeg plays the sound out as mono at a low sample rate; each number is the loudness (RMS) of
-    one equal slice of it, scaled so that the loud parts of the recording are near 1."""
+
+def loudness_picture(path, buckets=600, per_second=DETAIL_PER_SECOND, rate=2000):
+    """How loud the recording is along its length, for drawing it: (outline, detail).
+
+    outline: `buckets` numbers from 0 to 1, each the loudness (RMS) of one equal slice of the
+    whole recording, scaled so that its loud parts are near 1. detail: the same, but `per_second`
+    numbers for every second (for the close-ups of the cuts). ffmpeg plays the sound out as mono at
+    a low sample rate for it."""
     import numpy as np
-    p = subprocess.run([find_tool("ffmpeg"), "-v", "error", "-nostdin", "-i", path, "-vn", "-ac", "1",
-                        "-ar", str(rate), "-f", "s16le", "-"], capture_output=True, creationflags=NO_WINDOW)
+    p = run_tool([find_tool("ffmpeg"), "-v", "error", "-nostdin", "-i", path, "-vn", "-ac", "1",
+                  "-ar", str(rate), "-f", "s16le", "-"], text=False)
     data = p.stdout[:len(p.stdout) // 2 * 2]
     if p.returncode != 0 or len(data) < 2 * buckets:
         raise RuntimeError("ffmpeg could not read the sound:\n" + p.stderr.decode(errors="replace")[-1500:])
     samples = np.frombuffer(data, dtype="<i2").astype(np.float32)
-    per = len(samples) // buckets
-    loud = np.sqrt((samples[:per * buckets].reshape(buckets, per) ** 2).mean(axis=1))
+
+    def rms(per):
+        n = len(samples) // per
+        return np.sqrt((samples[:n * per].reshape(n, per) ** 2).mean(axis=1))
+
+    loud = rms(len(samples) // buckets)[:buckets]
     top = float(np.percentile(loud, 98))
-    return np.clip(loud / top, 0.0, 1.0).tolist() if top > 0 else [0.0] * buckets
+    if top <= 0:
+        return [0.0] * buckets, []
+    fine = rms(max(1, rate // per_second))
+    return np.clip(loud / top, 0.0, 1.0).tolist(), np.clip(fine / top, 0.0, 1.0).round(3).tolist()
+
+
+def loudness_outline(path, buckets=600, rate=2000):
+    """The outline of loudness_picture alone: `buckets` numbers from 0 to 1."""
+    return loudness_picture(path, buckets, rate=rate)[0]
 
 
 def fmt(sec):

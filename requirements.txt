@@ -1,3 +1,33 @@
-PySide6-Essentials>=6.8
-numpy
-faster-whisper
+# What the program needs, each at one exact version, so every build uses the same code.
+# Asked for directly: PySide6-Essentials, numpy, faster-whisper. The rest is what those three need.
+# The lines with "sys_platform" are only installed on that system; keep them (the file serves
+# Windows, Mac and Linux). Dependabot (.github/dependabot.yml) proposes newer versions.
+# To work the whole list out again:
+#   printf 'PySide6-Essentials>=6.8\nnumpy\nfaster-whisper\n' | uv pip compile - --universal --python-version 3.12 --no-header --no-annotate
+anyio==4.16.0 ; sys_platform != 'emscripten'
+av==19.0.2
+click==8.5.1
+colorama==0.4.6 ; sys_platform == 'win32'
+ctranslate2==4.9.0
+faster-whisper==1.2.1
+filelock==4.2.10
+flatbuffers==25.12.19
+fsspec==2026.9.0
+h11==0.16.0 ; sys_platform != 'emscripten'
+hf-xet==1.8.0 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+httpcore2==2.16.0 ; sys_platform != 'emscripten'
+httpx2==2.16.0
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+huggingface-hub==2.4.0
+idna==3.20
+numpy==2.5.4
+onnxruntime==1.32.0
+packaging==26.3
+protobuf==7.36.2
+pyside6-essentials==6.12.0
+pyyaml==6.0.3
+shiboken6==6.12.0
+tokenizers==0.23.3
+tqdm==4.70.1
+truststore==0.10.5 ; sys_platform != 'emscripten'
+typing-extensions==4.16.0

@@ -18,8 +18,17 @@ item. Remove it from this file once it is built.
   (light and dark), `mainwindow.py` the main window; `--uitest` makes every window once, off screen,
   and the release workflow runs it on the installed program. Tkinter, tkinterdnd2 and sv-ttk are gone.
 - **1.1.1 (released): stage 1 of the new look (below).**
-- **1.2.0: stages 2 and 3 of the new look (below).** `.github/RELEASE_NOTES.md` and the workflow's
-  default tag are set for it. To release: merge, then run the Release workflow (or push `v1.2.0`).
+- **1.2.0 (released): stages 2 and 3 of the new look (below).**
+- **1.3.0: Cancel, the result card, close-ups of the cuts, the date format, no half-written MP3.**
+  `.github/RELEASE_NOTES.md` and the workflow's default tag are set for it. To release: merge, then
+  run the Release workflow (or push `v1.3.0`).
+  - Cancel: `audio.Stopper` / `audio.stoppable` stop the work of the build's thread; every ffmpeg run
+    goes through `audio.run_tool` so it can be ended, and the speech loops call `audio.check_stop`.
+    `audio.Stopped` is a BaseException on purpose (see its docstring). New ffmpeg calls in the build
+    must use `run_tool`, not `subprocess.run`.
+  - Date format: `date_format` in config.json, `builder.DATE_FORMATS` / `format_date`. It is used for
+    the MP3's file name and title only (not the log, the History page or the recording's file name).
+  - Close-ups: `ui.CloseUp`, fed by `audio.loudness_picture` (the outline and 20 numbers a second).
 - **The new look (a mockup the maintainer gave, November 2026) was built in three stages.** Stage 1
   (released in 1.1.1): one window with a menu at the left, the Songs table, "The hour" bar and the
   progress list (`builder.build(tell=...)` gives the numbers). Stages 2 and 3 (1.2.0): the card "Where the service is cut" (`audio.loudness_outline`, `ui.Waveform`) with cuts
@@ -45,9 +54,6 @@ the maintainer asks what to build next. Remove an item once it is built.
 
 ### Fixes
 
-- **Partial MP3 blocks scheduled runs.** `audio.join_to_mp3` writes straight to the final path; if
-  ffmpeg dies partway, the leftover file makes `cli.choose` say "already made". Write to a temporary
-  name and `os.replace` on success.
 - **Public-domain status does not affect what is broadcast.** `catalog.songs_for` ignores
   `catalog.cleared()`. Add a setting "only use songs that are allowed to broadcast", or say in the
   README that the status is only a guide.
@@ -59,8 +65,17 @@ the maintainer asks what to build next. Remove an item once it is built.
 - `SECURITY.md` speaks only of Windows.
 - The fallback end phrases in `prelude.py` ("Serve the Lord", "Go in peace", `END_PHRASE_FALLBACK`)
   cannot be changed in Settings.
-- Unused `sys` import in `prelude.py`; no tests for `setup_wizard`, `add_songs`, `datepicker`; no
+- No tests for `setup_wizard`, `add_songs`, `datepicker`; no
   CONTRIBUTING file or issue templates; code signing for Windows and Mac.
+
+### Usability (offered in November 2026, after the new look; not yet asked for)
+
+- Keyboard keys for the cuts (arrows to nudge, Space to play, Tab between the cuts).
+- Remember the cuts per recording, so choosing the same recording again does not listen again.
+- Remember the window's size and position.
+- Read the service fewer times in one build (the silence cut inside the MP3 step, no temporary WAV).
+- Measure new songs in parallel in `catalog.update`.
+- The progress bar fills by step; the remaining pop-ups become in-page banners.
 
 ### Features
 

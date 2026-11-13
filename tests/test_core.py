@@ -233,6 +233,11 @@ class SongSilence(unittest.TestCase):
             self.assertLess(max(levels[:15] + levels[-15:]), 0.1)
             self.assertGreater(min(levels[25:55]), 0.8)
             self.assertRaises(RuntimeError, audio.loudness_outline, os.path.join(d, "missing.mp3"))
+            outline, detail = audio.loudness_picture(f, buckets=80, per_second=20)  # the close-ups of the cuts
+            self.assertEqual(outline, levels)
+            self.assertAlmostEqual(len(detail), 8 * 20, delta=4)
+            self.assertLess(max(detail[:30]), 0.1)
+            self.assertGreater(min(detail[50:110]), 0.8)
 
     @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
     def test_real_files_join_back_to_back(self):
@@ -916,6 +921,65 @@ class SaveConfig(unittest.TestCase):
         self.assertEqual(builder.output_name({"broadcast_name": "WXYZ"}, D(2026, 11, 15)), "WXYZ 2026-11-15.mp3")
         self.assertEqual(builder.output_name({}, D(2026, 11, 15)), "Church Radio 2026-11-15.mp3")
 
+    def test_date_formats(self):
+        """date_format: how the date is written in the MP3's file name and title."""
+        d = D(2027, 3, 7)
+        shown = {fmt: builder.format_date(d, fmt) for _style, formats in builder.DATE_FORMATS for fmt in formats}
+        self.assertEqual(len(set(shown.values())), len(shown))  # no two formats look the same
+        self.assertEqual([shown[f] for f in ("YYYY-MM-DD", "MM-DD-YYYY", "DD.MM.YYYY", "MM-DD-YY", "YYYYMMDD")],
+                         ["2027-03-07", "03-07-2027", "07.03.2027", "03-07-27", "20270307"])
+        self.assertEqual([shown[f] for f in ("MMMM D, YYYY", "D MMMM YYYY", "dddd, MMMM D, YYYY", "ddd, MMM D, YYYY")],
+                         ["March 7, 2027", "7 March 2027", "Sunday, March 7, 2027", "Sun, Mar 7, 2027"])
+        self.assertEqual(builder.format_date(D(2026, 12, 25), "dddd D MMMM YYYY"), "Friday 25 December 2026")
+        for style, formats in builder.DATE_FORMATS:
+            self.assertTrue(len(formats) >= 5 and all(builder.date_style(f) == style for f in formats))
+        cfg = {"broadcast_name": "WXYZ", "date_format": "MMMM D, YYYY"}
+        self.assertEqual(builder.output_name(cfg, d), "WXYZ March 7, 2027.mp3")
+        self.assertEqual(builder.output_title(cfg, d), "WXYZ Broadcast March 7, 2027")
+        # Typed in config.json: signs a file name cannot hold become "-", but stay in the title.
+        cfg["date_format"] = "M/D/YYYY"
+        self.assertEqual((builder.output_name(cfg, d), builder.output_title(cfg, d)),
+                         ("WXYZ 3-7-2027.mp3", "WXYZ Broadcast 3/7/2027"))
+        self.assertEqual(builder.date_style("M/D/YYYY"), "Short")
+        for bad in ("", None, "no date in it", 7):
+            self.assertEqual(builder.output_name({"date_format": bad}, d), "Church Radio 2027-03-07.mp3")
+
+    def test_mp3_is_whole_or_not_there(self):
+        """The MP3 gets its name only when it is whole: a run that fails or is stopped leaves the
+        broadcast made before as it was, and no half MP3."""
+        if not _has_ffmpeg():
+            self.skipTest("ffmpeg not installed")
+        with tempfile.TemporaryDirectory() as d:
+            a, out = os.path.join(d, "a.mp3"), os.path.join(d, "out.mp3")
+            _tone(a, [("tone", 3)])
+            self.assertAlmostEqual(audio.join_to_mp3([a], out, compression={"enabled": False}), 3.0, delta=0.3)
+            self.assertEqual(sorted(os.listdir(d)), ["a.mp3", "out.mp3"])
+            before = os.path.getsize(out)
+            self.assertRaises(RuntimeError, audio.join_to_mp3, [a, os.path.join(d, "missing.mp3")], out)
+            self.assertEqual((sorted(os.listdir(d)), os.path.getsize(out)), (["a.mp3", "out.mp3"], before))
+
+            long = os.path.join(d, "long.wav")
+            _tone(long, [("tone", 1800)])
+            stopper = audio.Stopper()
+            with audio.stoppable(stopper):
+                with self.assertRaises(audio.Stopped):  # stopped while ffmpeg writes
+                    audio.join_to_mp3([long], out, progress=lambda sec: stopper.stop())
+                self.assertRaises(audio.Stopped, audio.duration, a)  # and nothing more is started
+            self.assertEqual((sorted(os.listdir(d)), os.path.getsize(out)), (["a.mp3", "long.wav", "out.mp3"], before))
+            self.assertAlmostEqual(audio.duration(a), 3.0, delta=0.3)  # outside the with: not stopped
+
+    def test_stopping_does_not_spoil_the_song_list(self):
+        """Stopped is not an error of one song that is logged and passed over."""
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "a.mp3"), "wb").close()
+            csv = os.path.join(d, "songs.csv")
+
+            def stopped(_file):
+                raise audio.Stopped()
+
+            self.assertRaises(audio.Stopped, catalog.update, csv, [d], stopped, lambda m: None)
+            self.assertFalse(os.path.exists(csv))
+
     def test_build_without_intro_or_song_folders(self):
         if not _has_ffmpeg():
             self.skipTest("ffmpeg not installed")
@@ -1201,21 +1265,32 @@ class Windows(unittest.TestCase):
             return os.path.join(self.dir.name, "out.mp3")
 
         with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
-                mock.patch.object(mainwindow.audio, "loudness_outline", return_value=[0.5] * 600), \
+                mock.patch.object(mainwindow.audio, "loudness_picture", return_value=([0.5] * 600, [0.5] * 9000)), \
+                mock.patch.object(mainwindow.audio, "duration", return_value=3354.0), \
                 mock.patch.object(mainwindow.builder, "build", side_effect=build) as made, \
-                mock.patch.object(mainwindow.QMessageBox, "information", side_effect=lambda *a: told.append(a[2])), \
+                mock.patch.object(mainwindow.songs_window, "play", side_effect=told.append), \
                 mock.patch.object(mainwindow.QMessageBox, "critical", side_effect=lambda *a: told.append(a[2])):
             w = mainwindow.MainWindow()
             self.addCleanup(w.close)
+            self.assertTrue(w.result.isHidden() and w.cancel_btn.isHidden())
             w.start(os.path.join(self.dir.name, "service 11.15.2026.mkv"))
             self.assertTrue(w.busy)
             self.assertFalse(w.nav["songs"].isEnabled())
+            self.assertFalse(w.cancel_btn.isHidden())
             _pump(lambda: not w.busy)
             self.assertEqual(made.call_args[1]["date"], D(2026, 11, 15))  # read from the file name
             self.assertEqual(w.date.get(), D(2026, 11, 15))
             self.assertIn("Writing MP3", w.text.toPlainText())
             self.assertEqual(w.status.text(), "Done.")
-            self.assertTrue(told and told[0].startswith("MP3 saved:"))
+            # No pop-up: a card on the page shows the MP3, and plays it or opens its folder.
+            out = os.path.join(self.dir.name, "out.mp3")
+            self.assertFalse(w.result.isHidden() or not w.cancel_btn.isHidden())
+            self.assertEqual((w.result.head.text(), w.result.where.text(), w.result.warning.isHidden()),
+                             ("The broadcast is ready", f"out.mp3 · 55:54 · {self.dir.name}", True))
+            open(out, "wb").close()
+            w.result.play_btn.click()
+            w.result.folder_btn.click()
+            self.assertEqual(told, [out, self.dir.name])
             self.assertTrue(w.nav["songs"].isEnabled())
             self.assertEqual([w.steps[k].state for k in w.steps], ["done"] * 5)
             self.assertEqual((w.steps["start"].value.text(), w.steps["end"].value.text()), ("9:02", "1:08:15"))
@@ -1223,6 +1298,7 @@ class Windows(unittest.TestCase):
             self.assertEqual(w.drop.name.text(), "service 11.15.2026.mkv")
             _pump(lambda: w.wave.levels is not None)  # the picture of the recording, with both cuts
             self.assertEqual((len(w.wave.levels), w.wave.cuts), (600, {"start": 542.0, "end": 4095.0}))
+            self.assertEqual((len(w.wave.detail), w.wave.per_second), (9000, 20))
             self.assertFalse(w.wave_card.isHidden())
             w.wave.set_length(4440.0)
             self.assertEqual(w.wave.steps(), [0, 900, 1800, 2700, 3600])
@@ -1234,7 +1310,97 @@ class Windows(unittest.TestCase):
             _pump(lambda: not w.busy)
             self.assertEqual((w.status.text(), told[-1]), ("Failed.", "ffmpeg not found"))
             self.assertIsNone(w.hour)  # the hour of the build before is not left on show
+            self.assertTrue(w.result.isHidden())  # nor its result
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+
+            def too_long(path, warn=None, **more):
+                warn("Intro + service is 1:04:10.")
+                return out
+
+            made.side_effect = too_long
+            w.start(os.path.join(self.dir.name, "service.mkv"))
+            _pump(lambda: not w.busy)
+            self.assertEqual(w.status.text(), "Done, but the MP3 is too long.")
+            self.assertEqual((w.result.warning.isHidden(), w.result.warning.text(), w.result.tile.kind),
+                             (False, "Intro + service is 1:04:10.", "warn"))
+
+    def test_cancel_stops_the_broadcast(self):
+        """Cancel: the work is stopped, nothing is saved, the lock is given back, and the cuts
+        already found can still be used."""
+        import threading
+        waiting = threading.Event()
+
+        def build(path, cuts=None, tell=None, **more):
+            if cuts is None:
+                tell("start", 542.0)
+                tell("end", 4095.0)
+            waiting.set()
+            for _ in range(500):  # (as the real work does between its steps)
+                audio.check_stop()
+                time.sleep(0.01)
+            return os.path.join(self.dir.name, "out.mp3")
+
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.audio, "loudness_picture", return_value=([0.5] * 600, [0.5] * 9000)), \
+                mock.patch.object(mainwindow.audio, "duration", return_value=4440.0), \
+                mock.patch.object(mainwindow.builder, "build", side_effect=build):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.start(os.path.join(self.dir.name, "service.mkv"))
+            _pump(waiting.is_set)
+            _pump(lambda: w.wave.known())
+            w.step_starts("silence")
+            w.cancel_btn.click()
+            self.assertEqual((w.status.text(), w.cancel_btn.isEnabled()), ("Stopping ...", False))
+            _pump(lambda: not w.busy)
+            self.assertEqual((w.status.text(), w.result.isHidden(), w.cancel_btn.isHidden()), ("Stopped.", True, True))
+            self.assertEqual([w.steps[k].state for k in w.steps], ["done", "done", "todo", "todo", "todo"])
+            self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
+            self.assertEqual(builder.load_history(), [])
+            self.assertEqual((w.make_btn.isHidden(), w.make_btn.text()), (False, "Make the broadcast"))
+            self.assertTrue(w.choose_btn.isEnabled() and w.wave.editable)
+
+    def test_close_ups_of_the_cuts(self):
+        """Under the picture of the recording each cut is shown from near: a click or a drag there
+        places the cut to a tenth of a second."""
+        w = ui.Waveform()
+        ups = [ui.CloseUp(w, which) for which in ("start", "end")]
+        moved = []
+        w.moved.connect(moved.append)
+        for c in ups:
+            c.resize(400, 100)
+            c.grab()  # nothing known yet: still drawn
+        w.set_levels([0.5] * 600, [0.5] * (4440 * 20), 20)
+        w.set_length(4440.0)
+        w.set_cut("start", 542.0)
+        w.set_cut("end", None)
+        start, end = ups
+        self.assertEqual((start.first(), start.seconds_at(200), start.x_of(542.0)), (522.0, 542.0, 200.0))
+        self.assertEqual((end.at(), end.first()), (4440.0, 4420.0))  # nothing cut: the end of the recording
+        self.assertEqual((ui.clock_exact(542.44), ui.clock_exact(3725.96)), ("9:02.4", "1:02:06.0"))
+        from PySide6.QtCore import QEvent, QPointF
+        from PySide6.QtGui import QMouseEvent
+        kinds = {"mousePressEvent": QEvent.MouseButtonPress, "mouseMoveEvent": QEvent.MouseMove,
+                 "mouseReleaseEvent": QEvent.MouseButtonRelease}
+
+        def press(c, x, kind):
+            getattr(c, kind)(QMouseEvent(kinds[kind], QPointF(x, 50), QPointF(x, 50), Qt.LeftButton, Qt.LeftButton,
+                                         Qt.NoModifier))
+
+        press(start, 100, "mousePressEvent")  # not while a broadcast is made
+        self.assertEqual((w.cuts["start"], moved), (542.0, []))
+        w.set_editable(True)
+        press(start, 100, "mousePressEvent")  # 100 of 400 pixels: 10 s before the middle
+        self.assertEqual((w.cuts["start"], start.first()), (532.0, 522.0))  # the picture stays while dragged
+        press(start, 123, "mouseMoveEvent")
+        self.assertEqual(w.cuts["start"], 534.3)
+        press(start, 123, "mouseReleaseEvent")
+        self.assertEqual((moved, start.first()), (["start"], 514.3))  # then the cut is in the middle again
+        press(end, 150, "mousePressEvent")
+        press(end, 150, "mouseReleaseEvent")
+        self.assertEqual((w.cuts["end"], moved), (4435.0, ["start", "end"]))
+        for c in ups:
+            c.grab()
 
     def test_cuts_are_checked_moved_and_played(self):
         """"Check the cuts" on: the app finds the cuts and waits. The person moves and plays them,
@@ -1252,12 +1418,11 @@ class Windows(unittest.TestCase):
             return 542.0, 4095.0
 
         with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
-                mock.patch.object(mainwindow.audio, "loudness_outline", return_value=[0.5] * 600), \
+                mock.patch.object(mainwindow.audio, "loudness_picture", return_value=([0.5] * 600, [0.5] * 9000)), \
                 mock.patch.object(mainwindow.audio, "duration", return_value=4440.0), \
                 mock.patch.object(mainwindow.builder, "build", side_effect=build), \
                 mock.patch.object(mainwindow.builder, "find_cuts", side_effect=find_cuts), \
-                mock.patch.object(mainwindow.player.Player, "play", side_effect=lambda *a: played.append(a)), \
-                mock.patch.object(mainwindow.QMessageBox, "information"):
+                mock.patch.object(mainwindow.player.Player, "play", side_effect=lambda *a: played.append(a)):
             w = mainwindow.MainWindow()
             self.addCleanup(w.close)
             w.resize(1180, 860)
@@ -1270,6 +1435,7 @@ class Windows(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
             self.assertEqual(w.status.text(), "Check the cuts, then click Make the broadcast.")
             self.assertTrue(w.wave.editable and w.drop.play_start.isEnabled())
+            self.assertFalse(any(c.isHidden() for c in w.closeups))
 
             w.nudges[0].click()  # start cut 5 s earlier
             w.nudges[-1].click()  # end cut 5 s later
@@ -1382,6 +1548,23 @@ class Windows(unittest.TestCase):
         self.assertEqual((c["broadcast_name"], c["target_minutes"], c["tolerance_seconds"]), ("St. John Radio", 60, 30))
         self.assertEqual((c["theme"], c["keep_me"], c["song_folders"]), ("dark", 7, [self.dir.name]))
         self.assertEqual(c["patriotic_holidays"], ["memorial"])
+        # The date in the file name: Short or Long, and the ways to write each.
+        self.assertEqual((c["date_format"], w.date_style.current(), w.date_format.currentText()),
+                         ("YYYY-MM-DD", "Short", "2026-11-15"))
+        self.assertIn('"St. John Radio 2026-11-15.mp3"', w.name_example.text())
+        w.date_style.buttons["Long"].click()
+        self.assertEqual([w.date_format.itemText(i) for i in range(3)],
+                         ["November 15, 2026", "15 November 2026", "Sunday, November 15, 2026"])
+        w.date_format.setCurrentIndex(w.date_format.findData("MMM D, YYYY"))
+        w.name.setText("Grace Radio")
+        self.assertIn('"Grace Radio Nov 15, 2026.mp3"', w.name_example.text())
+        self.assertEqual(w.collect()["date_format"], "MMM D, YYYY")
+        w.name.setText("St. John Radio")
+        again = self.wizard(date_format="D MMM YYYY")  # the format saved is the one shown
+        self.assertEqual((again.date_style.current(), again.date_format.currentText()), ("Long", "15 Nov 2026"))
+        own = self.wizard(date_format="M/D/YYYY")  # one typed in config.json is kept and listed
+        self.assertEqual((own.date_style.current(), own.date_format.currentText(), own.collect()["date_format"]),
+                         ("Short", "11/15/2026", "M/D/YYYY"))
         w.minutes.setText("45")
         w.theme.setCurrentIndex(ui.THEMES.index("light"))
         w.holidays["veterans"].setChecked(True)

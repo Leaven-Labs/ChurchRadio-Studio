@@ -2,6 +2,7 @@
 import datetime as dt
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -66,10 +67,54 @@ def save_config(cfg):
     os.replace(tmp, path)  # never a half-written config
 
 
-def output_name(cfg, date):
-    """The MP3 file name, for example "Church Radio 2026-11-15.mp3"."""
+# How the service date is written in the MP3's file name and title (date_format in config.json),
+# as the Settings page offers them: short ones (numbers only) and long ones (the month as a word).
+# In a format: YYYY 2026, YY 26, MMMM November, MMM Nov, MM 11, M 11 (no zero before it),
+# DD 05, D 5, dddd Sunday, ddd Sun. Everything else is written as it is.
+DATE_FORMAT = "YYYY-MM-DD"
+DATE_FORMATS = (("Short", ("YYYY-MM-DD", "MM-DD-YYYY", "DD-MM-YYYY", "MM.DD.YYYY", "DD.MM.YYYY", "YYYY.MM.DD",
+                           "MM-DD-YY", "YYYYMMDD")),
+                ("Long", ("MMMM D, YYYY", "D MMMM YYYY", "dddd, MMMM D, YYYY", "dddd D MMMM YYYY",
+                          "MMM D, YYYY", "D MMM YYYY", "ddd, MMM D, YYYY")))
+EXAMPLE_DATE = dt.date(2026, 11, 15)  # the date the formats are shown with (day and month can't be mixed up)
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+          "November", "December")
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+NOT_IN_FILE_NAMES = '\\/:*?"<>|'
+
+
+def format_date(date, fmt=DATE_FORMAT):
+    """The date written as the format says: format_date(d, "MMM D, YYYY") -> "Nov 15, 2026"."""
+    parts = {"YYYY": f"{date.year:04d}", "YY": f"{date.year % 100:02d}", "MMMM": MONTHS[date.month - 1],
+             "MMM": MONTHS[date.month - 1][:3], "MM": f"{date.month:02d}", "M": str(date.month),
+             "DD": f"{date.day:02d}", "D": str(date.day), "dddd": WEEKDAYS[date.weekday()],
+             "ddd": WEEKDAYS[date.weekday()][:3]}
+    return re.sub("YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd", lambda m: parts[m.group()], fmt)
+
+
+def date_format(cfg):
+    """The date format of the settings; the usual one if none is set or it holds no date."""
+    fmt = str(cfg.get("date_format") or "").strip()
+    return fmt if fmt and format_date(EXAMPLE_DATE, fmt) != fmt else DATE_FORMAT
+
+
+def date_style(fmt):
+    """ "Short" or "Long": the group of DATE_FORMATS a format is in (one typed in config.json: by its month)."""
+    return next((style for style, formats in DATE_FORMATS if fmt in formats), "Long" if "MMM" in fmt else "Short")
+
+
+def output_title(cfg, date):
+    """The MP3's title, for example "Church Radio Broadcast 2026-11-15"."""
     name = (cfg.get("broadcast_name") or DEFAULT_NAME).strip()
-    return f"{name} {date:%Y-%m-%d}.mp3"
+    return f"{name} Broadcast {format_date(date, date_format(cfg))}"
+
+
+def output_name(cfg, date):
+    """The MP3 file name, for example "Church Radio 2026-11-15.mp3". Signs that a file name
+    cannot hold (a format typed in config.json, such as MM/DD/YYYY) become "-"."""
+    name = (cfg.get("broadcast_name") or DEFAULT_NAME).strip()
+    day = "".join("-" if ch in NOT_IN_FILE_NAMES else ch for ch in format_date(date, date_format(cfg)))
+    return f"{name} {day}.mp3"
 
 
 def songs_csv():
@@ -291,11 +336,10 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
             log("Writing MP3 (no compression) ...")
         parts = ([intro] if intro else []) + [(svc, 0.0, svc_end)] + \
             [(s["path"], s["start"], s["end"]) for s in chosen]
-        name = (cfg.get("broadcast_name") or DEFAULT_NAME).strip()
         whole = intro_len + svc_end + sum(s["duration"] for s in chosen)
         length = audio.join_to_mp3(parts, out,
                                    cfg.get("mp3_bitrate", "192k"),
-                                   {"title": f"{name} Broadcast {date:%m/%d/%Y}"}, comp,
+                                   {"title": output_title(cfg, date)}, comp,
                                    progress=(lambda sec: tell("mp3", min(1.0, sec / whole))) if whole > 0 else None)
     save_history(date, [s["path"] for s in chosen], out)
     log(f"Done: {out} ({audio.fmt(length)})")

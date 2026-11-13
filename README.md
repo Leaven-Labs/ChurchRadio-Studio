@@ -13,7 +13,10 @@ ready-to-air MP3:
 **your intro → the service → songs that fill the rest of the hour**
 
 <p align="center">
-  <img src="docs/screenshots/broadcast.png" width="820" alt="The Broadcast page after a broadcast is made: the finished MP3, where the service was cut, the hour and the progress list">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/broadcast-dark.png">
+    <img src="docs/screenshots/broadcast.png" width="820" alt="The Broadcast page after a broadcast is made: the finished MP3, where the service was cut, the hour and the progress list">
+  </picture>
 </p>
 
 - **Cuts the organ prelude** (but keeps a choir anthem) by listening for your opening words, such
@@ -25,6 +28,13 @@ ready-to-air MP3:
   that **fit the church year**, plus patriotic songs on national holiday weekends. Songs used in
   recent weeks go last.
 - **Evens out the sound** with a broadcast compressor and limiter.
+
+The app is **light or dark**, as your computer is set (or as you choose in Settings):
+
+<p align="center">
+  <img src="docs/screenshots/songs.png" width="49%" alt="The Songs page in the light look">
+  <img src="docs/screenshots/songs-dark.png" width="49%" alt="The Songs page in the dark look">
+</p>
 
 Everything runs **on your own computer**. The speech recognition is downloaded once and then works
 offline. Nothing about your services leaves the computer; the only thing that ever does is a song's
@@ -78,7 +88,10 @@ A short wizard sets the app up for your church. Everything can be changed later 
 page.
 
 <p align="center">
-  <img src="docs/screenshots/wizard.png" width="620" alt="The setup wizard's Service words step">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/wizard-dark.png">
+    <img src="docs/screenshots/wizard.png" width="620" alt="The setup wizard's Service words step">
+  </picture>
 </p>
 
 1. **Welcome.**
@@ -127,7 +140,10 @@ in Audacity).
 dim parts before and after are cut off.
 
 <p align="center">
-  <img src="docs/screenshots/cuts.png" width="780" alt="Where the service is cut: the recording with the start and end markers, and a close-up of each cut">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/cuts-dark.png">
+    <img src="docs/screenshots/cuts.png" width="780" alt="Where the service is cut: the recording with the start and end markers, and a close-up of each cut">
+  </picture>
 </p>
 
 - **Play from start cut** / **Play to end cut** play the 12 seconds the service will start and end
@@ -149,7 +165,10 @@ The **History** page lists the broadcasts you made, with their songs. **Play** o
 folder**.
 
 <p align="center">
-  <img src="docs/screenshots/history.png" width="780" alt="The History page: each broadcast with its service date, season, file and songs">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png">
+    <img src="docs/screenshots/history.png" width="780" alt="The History page: each broadcast with its service date, season, file and songs">
+  </picture>
 </p>
 
 ### The date in the file name
@@ -295,7 +314,10 @@ Every change is saved at once. Select a song to see its file, the words heard in
 or may not be broadcast. A right-click on the list has every action too.
 
 <p align="center">
-  <img src="docs/screenshots/songs.png" width="820" alt="The Songs page: each song with its on/off switch, season, length and whether it may be broadcast">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/songs-dark.png">
+    <img src="docs/screenshots/songs.png" width="820" alt="The Songs page: each song with its on/off switch, season, length and whether it may be broadcast">
+  </picture>
 </p>
 
 - **On / off**: click the switch, or select several and right-click (or press Space). Songs that
@@ -398,7 +420,10 @@ hymns; newer songs are listed by title only.
 Most settings are on the **Settings** page; click **Save** when you have changed them.
 
 <p align="center">
-  <img src="docs/screenshots/settings.png" width="780" alt="The Settings page: the broadcast's name, the date in the file name, the length, the folder and the intro">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
+    <img src="docs/screenshots/settings.png" width="780" alt="The Settings page: the broadcast's name, the date in the file name, the length, the folder and the intro">
+  </picture>
 </p>
 
 All of them are in `config.json` in your [settings folder](#where-your-files-are); edit it in a text
@@ -550,7 +575,8 @@ and `SHA256SUMS.txt`. The Python packages and the GitHub Actions are pinned to e
 Dependabot proposes updates.
 
 **The pictures in this README** are made by `python tools/screenshots.py`, off screen and with
-made-up data. Run it again after the look of the app changes.
+made-up data, each in the light and the dark look. On GitHub a reader sees the look that matches
+their own setting. Run the script again after the look of the app changes.
 
 <details>
 <summary><b>Where things are</b></summary>

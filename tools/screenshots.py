@@ -3,7 +3,8 @@
     python tools/screenshots.py
 
 No recording, models or internet are needed: the windows are made off screen, as --uitest does,
-and filled with an example church's settings, songs and history. Run it again after the look of
+and filled with an example church's settings, songs and history. Every picture is made in the
+light and in the dark look (name.png, name-dark.png). Run it again after the look of
 the app changes.
 """
 import csv
@@ -105,24 +106,37 @@ def loudness(length, start, end, per_second):
 
 
 def main():
+    import builder
     import mainwindow
     import paths
-    import setup_wizard
     import ui
-    from PySide6.QtCore import QRect
 
     mp3 = example_data()
     paths.version = lambda: "1.3.1"  # (from the source code it says "development")
     app = ui.start_app(["screenshots"], "light")
+    for theme in ("light", "dark"):  # every picture twice: name.png and name-dark.png
+        cfg = builder.load_config()
+        cfg["theme"] = theme  # (so the Settings page shows it too)
+        builder.save_config(cfg)
+        window = mainwindow.MainWindow()
+        ui.apply_theme(app, theme)
+        pictures(app, window, mp3, "" if theme == "light" else "-dark")
+        window.close()
+    shutil.rmtree(DATA, ignore_errors=True)  # the made-up settings and files
+
+
+def pictures(app, window, mp3, ending):
+    import builder
+    import setup_wizard
+    from PySide6.QtCore import QRect
 
     def save(widget, name, crop=None):
         for _ in range(5):
             app.processEvents()
         picture = widget.grab(crop) if crop else widget.grab()
-        picture.save(os.path.join(OUT, name + ".png"))
-        print(name, picture.width(), "x", picture.height())
+        picture.save(os.path.join(OUT, name + ending + ".png"))
+        print(name + ending, picture.width(), "x", picture.height())
 
-    window = mainwindow.MainWindow()
     window.resize(1180, 1010)
     window.show()
     length, start, end, per = 4440.0, 542.3, 4095.6, 20
@@ -160,14 +174,11 @@ def main():
     window.show_page("settings", models=False)
     save(window, "settings")
 
-    import builder
     wizard = setup_wizard.SetupWizard(window, builder.load_config(), first_run=True)
     wizard.show()
     wizard.form.go(wizard.form.pages.index(wizard.form.page_service))
     save(wizard, "wizard")
     wizard.done(0)
-    window.close()
-    shutil.rmtree(DATA, ignore_errors=True)  # the made-up settings and files
 
 
 if __name__ == "__main__":

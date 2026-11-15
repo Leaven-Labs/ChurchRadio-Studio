@@ -41,6 +41,22 @@ item. Remove it from this file once it is built.
     Not yet heard on a real Windows PC or Mac.
   - Not built: the notes in the mockup's cut labels ("choir kept", the words found), and marks for
     the long silences cut out of the middle.
+- **1.4.0: zoom, typed cut times, the end timing in Settings, updates from inside the app.**
+  `.github/RELEASE_NOTES.md` and the workflow's default tag are set for it. To release: merge, then
+  run the Release workflow (or push `v1.4.0`).
+  - Zoom: `ui.Waveform.view` (None = the whole recording), `zoom` / `zoom_to` / `show_part`; drawn from
+    the 20-a-second numbers when closer than the outline. Typed times: `ui.parse_clock`,
+    `Waveform.place`, `MainWindow.cut_typed`.
+  - End timing: `end_after_seconds` and `end_answer_pad` are fields of the Settings page now
+    (`end_alt_pad` follows `end_answer_pad` unless config.json gives it its own value).
+  - Updates: `updates.py` (no Qt), `mainwindow.UpdateBanner`. The check at the start is ON unless
+    `check_updates` is false (the maintainer asked for it, November 2026); it is skipped from source
+    and in dev builds (`updates.is_release`). Only this repository's release files are taken, and
+    only if they match `SHA256SUMS.txt`: keep the asset names in `updates.ASSETS` and the release
+    workflow the same. Windows runs Setup with `/SILENT /RELAUNCH=1` (`installer.iss` starts the app
+    again); Linux runs the download's `install.sh`; the Mac only opens the DMG.
+  - Not yet tried on a real Windows PC, Mac or installed Linux: the install step (`updates.install`).
+    The download, the checksum and the Linux unpack-and-install are covered by tests.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.
@@ -64,7 +80,10 @@ the maintainer asks what to build next. Remove an item once it is built.
 - `builder.recent_songs` counts history entries, not weeks: filter by date. Write `history.json`
   atomically, as `save_config` does.
 - `audio.trim_service` does not check that the silence-detect pass worked.
-- `SECURITY.md` speaks only of Windows.
+- `SECURITY.md` asks for "your Windows version" only.
+- The Mac update only opens the DMG. Replacing the app in place (mount, copy over, start again) needs
+  a Mac to try it on. Code signing would also let the update be checked by signature, not only by
+  the checksum from the same release.
 - The fallback end phrases in `prelude.py` ("Serve the Lord", "Go in peace", `END_PHRASE_FALLBACK`)
   cannot be changed in Settings.
 - No tests for `setup_wizard`, `add_songs`, `datepicker`; no
@@ -72,7 +91,7 @@ the maintainer asks what to build next. Remove an item once it is built.
 
 ### Usability (offered in November 2026, after the new look; not yet asked for)
 
-- Keyboard keys for the cuts (arrows to nudge, Space to play, Tab between the cuts).
+- Keyboard keys for the cuts (arrows to nudge, Space to play). (The cut times can be typed since 1.4.0.)
 - Remember the cuts per recording, so choosing the same recording again does not listen again.
 - Remember the window's size and position.
 - Read the service fewer times in one build (the silence cut inside the MP3 step, no temporary WAV).
@@ -89,5 +108,4 @@ the maintainer asks what to build next. Remove an item once it is built.
 5. Outro and station-ID slots (a closing announcement; a short ID between service and songs).
 6. Auto-fit when too long: offer a fade-out at the target length.
 7. Other languages and liturgies: multilingual speech models, holidays outside the US.
-8. Optional update check in About (off by default, to keep the offline promise).
-9. Podcast output: chapter marks, cover art, optionally an RSS feed entry.
+8. Podcast output: chapter marks, cover art, optionally an RSS feed entry.

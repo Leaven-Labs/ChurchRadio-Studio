@@ -23,8 +23,8 @@ Please give us a reasonable time to release a fix before you share details publi
 
 ## Supported versions
 
-Only the newest release receives fixes. To update, download the newest
-`ChurchRadio-Studio-Setup.exe` from the [Releases](../../releases) page and run it.
+Only the newest release receives fixes. To update, click **Update now** when the app offers it, or
+download the newest version from the [Releases](../../releases) page and install it over the old one.
 
 ## Scope
 

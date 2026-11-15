@@ -1192,6 +1192,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # the window tests draw t
 try:
     import mainwindow  # noqa: E402  (needs PySide6)
     import ui  # noqa: E402
+    import updates  # noqa: E402
     from PySide6.QtCore import Qt  # noqa: E402
 except ImportError:
     mainwindow = None
@@ -1470,6 +1471,199 @@ class Windows(unittest.TestCase):
         self.assertEqual(mainwindow.time_left(20), "less than a minute left")
         self.assertEqual((mainwindow.time_left(70), mainwindow.time_left(200)), ("about 1 min left", "about 3 min left"))
 
+    def test_waveform_zooms(self):
+        """The picture of the recording zooms in on a part of it: the cuts, the drag and the
+        times under it follow the part shown."""
+        w = ui.Waveform()
+        w.resize(800, 126)
+        seen = []
+        w.viewed.connect(lambda: seen.append(w.view))
+        w.zoom(0.5)  # nothing known yet: nothing to zoom
+        self.assertFalse(w.zoomed())
+        w.set_levels([0.5] * 600, [0.25] * (4440 * 20), 20)
+        w.set_length(4440.0)
+        w.set_cut("start", 542.0)
+        w.set_cut("end", 4095.0)
+        w.set_editable(True)
+        self.assertEqual((w.first(), w.span(), w.x_of(2220.0), w.seconds_at(400)), (0.0, 4440.0, 400.0, 2220.0))
+        self.assertEqual((w.level(0.0, 22.2), w.level(0.0, 1.0)), (0.5, 0.25))  # the outline; closer, the slices
+        w.zoom(0.5)  # around the middle
+        self.assertEqual((w.view, w.steps()), ((1110.0, 2220.0), [1200, 1800, 2400, 3000]))
+        w.zoom(0.5, around=1110.0)  # the second at the left edge stays there
+        self.assertEqual(w.view, (1110.0, 1110.0))
+        w.show_all()
+        self.assertEqual((w.view, w.steps()), (None, [0, 900, 1800, 2700, 3600]))
+        w.zoom_to("start")  # two minutes, the cut in the middle
+        self.assertEqual((w.view, w.cut_x("start"), w.steps()), ((482.0, 120.0), 400.0, [510, 540, 570, 600]))
+        self.assertTrue(w.cut_x("end") > w.width())  # the end cut is not in the part shown
+        self.assertEqual((w.cut_near(402), w.cut_near(799)), ("start", None))
+        w.move_cut("start", w.seconds_at(410))  # a pixel is 0.15 s now, not 5.5 s
+        self.assertEqual(w.cuts["start"], 543.5)
+        w.zoom(0.0001)  # never closer than MIN_SPAN
+        self.assertEqual(w.span(), w.MIN_SPAN)
+        w.show_part(99999.0, 60.0)  # kept inside the recording
+        self.assertEqual(w.view, (4380.0, 60.0))
+        w.zoom_to("end")  # already closer than two minutes: stays as close
+        self.assertEqual(w.view, (4065.0, 60.0))
+        w.grab()
+        w.zoom(1000)  # all the way out: the whole recording again
+        self.assertFalse(w.zoomed())
+        self.assertEqual(seen[-1], None)
+        w.zoom_to("end")
+        w.reset()  # a new recording starts with the whole picture
+        self.assertEqual((w.view, seen[-1]), (None, None))
+
+        from PySide6.QtCore import QEvent, QPoint, QPointF
+        from PySide6.QtGui import QMouseEvent, QWheelEvent
+        w.set_levels([0.5] * 600)
+        w.set_length(4440.0)
+        w.set_cut("start", 542.0)
+        w.set_cut("end", 4095.0)
+
+        def wheel(x, turn, keys):
+            e = QWheelEvent(QPointF(x, 60), QPointF(x, 60), QPoint(0, 0), QPoint(0, turn), Qt.NoButton, keys,
+                            Qt.NoScrollPhase, False)
+            w.wheelEvent(e)
+            return e.isAccepted()
+
+        self.assertFalse(wheel(200, 120, Qt.NoModifier))  # a plain wheel is left to the page
+        self.assertFalse(w.zoomed())
+        self.assertTrue(wheel(200, 120, Qt.ControlModifier))  # Ctrl: zoom where the pointer is
+        self.assertEqual((round(w.span(), 1), round(w.seconds_at(200), 1)), (3552.0, 1110.0))
+        self.assertTrue(wheel(200, -120, Qt.ShiftModifier))  # Shift: along the recording
+        self.assertEqual(round(w.first(), 1), 666.0)
+
+        def mouse(kind, x):
+            getattr(w, kind)(QMouseEvent({"mousePressEvent": QEvent.MouseButtonPress, "mouseMoveEvent": QEvent.MouseMove,
+                                          "mouseReleaseEvent": QEvent.MouseButtonRelease}[kind], QPointF(x, 60),
+                                         QPointF(x, 60), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+        mouse("mousePressEvent", 400)  # beside the cuts: the picture is dragged along
+        mouse("mouseMoveEvent", 380)
+        mouse("mouseReleaseEvent", 380)
+        self.assertEqual((round(w.first(), 1), w.cuts), (754.8, {"start": 542.0, "end": 4095.0}))
+
+    def test_times_are_typed(self):
+        self.assertEqual([ui.parse_clock(t) for t in ("9:02", "9:02.4", "1:08:15", "542", "542,5", " 0:07 ")],
+                         [542.0, 542.4, 4095.0, 542.0, 542.5, 7.0])
+        self.assertEqual([ui.parse_clock(t) for t in ("", "nine", "9:75", "1:75:00", "1:2:3:4", "-5", "9:", ":30")],
+                         [None] * 8)
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.wave.set_length(4440.0)
+            w.wave.set_cut("start", 542.0)
+            w.wave.set_cut("end", None)
+            w.job = {"path": "service.mkv", "made": True}
+            w.show_cut_controls(make=False)
+            start, end = w.cut_times["start"], w.cut_times["end"]
+            self.assertEqual((start.text(), end.text(), start.isHidden()), ("9:02.0", "", False))
+
+            def type_in(box, which, text):
+                box.setText(text)
+                box.setModified(True)
+                w.cut_typed(which)
+
+            type_in(end, "end", "1:08:15.5")
+            self.assertEqual((w.wave.cuts["end"], end.text(), w.steps["end"].value.text()),
+                             (4095.5, "1:08:15.5", "1:08:16"))
+            self.assertEqual((w.make_btn.isHidden(), w.make_btn.text()), (False, "Make the broadcast again"))
+            type_in(start, "start", "soon")  # not a time: taken back, and said
+            self.assertEqual((w.wave.cuts["start"], start.text()), (542.0, "9:02.0"))
+            self.assertIn("is not a time", w.status.text())
+            type_in(start, "start", "2:00:00")  # past the end cut: kept apart from it
+            self.assertEqual((w.wave.cuts["start"], start.text()), (4065.5, "1:07:45.5"))
+            type_in(start, "start", "")  # empty: nothing is cut
+            self.assertEqual((w.wave.cuts["start"], start.text()), (None, ""))
+            w.cut_typed("end")  # the box was only left: nothing moves
+            self.assertEqual(w.wave.cuts["end"], 4095.5)
+
+            w.zoom_btns["start"].click()  # the buttons and the bar under the picture
+            self.assertEqual((w.wave.view, w.wave_scroll.isHidden(), w.wave_scroll.maximum()),
+                             ((0.0, 120.0), False, 43200))
+            w.zoom_btns["in"].click()
+            self.assertEqual(w.wave.span(), 60.0)
+            w.wave_scroll.setValue(6000)  # the bar moves along the recording
+            self.assertEqual(w.wave.view, (600.0, 60.0))
+            w.zoom_btns["all"].click()
+            self.assertEqual((w.wave.zoomed(), w.wave_scroll.isHidden(), w.zoom_btns["out"].isEnabled()),
+                             (False, True, False))
+
+    def test_update_is_offered_and_installed(self):
+        """A newer version is offered on the Broadcast page; Update now downloads it, starts it
+        and closes the app. With nothing new the page stays quiet unless the person asked."""
+        info = updates.release_info({"tag_name": "v9.9.9", "body": "## What's new in 9.9.9\n\n- **More.** Things.\n",
+                                     "assets": [{"name": n, "size": 3, "browser_download_url": updates.DOWNLOADS + "v9.9.9/" + n}
+                                                for n in (*updates.ASSETS.values(), updates.SUMS)]})
+        closed = []
+
+        def download(update, progress=None, stopped=None):
+            progress(1, 3)
+            return "new-version.file"
+
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(updates, "check", side_effect=[None, None, updates.UpdateError("no internet"), info]), \
+                mock.patch.object(updates, "can_install", return_value=True), \
+                mock.patch.object(updates, "download", side_effect=download), \
+                mock.patch.object(updates, "install", return_value="Starting.") as install, \
+                mock.patch.object(mainwindow.MainWindow, "quit_for_update", lambda self: closed.append(1)), \
+                mock.patch.object(mainwindow.QTimer, "singleShot", lambda _ms, f: f()):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            banner = w.update_banner
+            w.check_updates()  # at the start: nothing new, nothing shown
+            _pump(lambda: updates.check.call_count == 1)
+            _pump()
+            self.assertTrue(banner.isHidden())
+            w.check_updates(asked=True)  # asked in About: the answer is shown
+            _pump(lambda: "newest" in banner.head.text())
+            self.assertEqual((banner.isHidden(), banner.update_btn.isHidden(), banner.later_btn.text()),
+                             (False, True, "Close"))
+            w.check_updates(asked=True)
+            _pump(lambda: "Could not" in banner.head.text())
+            self.assertEqual((banner.sub.text(), banner.page_btn.isHidden()), ("no internet", False))
+            w.check_updates()
+            _pump(lambda: "9.9.9" in banner.head.text())
+            self.assertEqual((banner.head.text(), banner.update_btn.isHidden(), banner.later_btn.text()),
+                             ("Version 9.9.9 is available", False, "Later"))
+            self.assertEqual((banner.notes.text(), banner.notes.isHidden()), ("•  More. Things.", True))
+            banner.new_btn.click()
+            self.assertFalse(banner.notes.isHidden())
+
+            w.busy = True  # a broadcast is being made: downloaded, but not installed yet
+            banner.update_btn.click()
+            _pump(lambda: banner.ready)
+            self.assertEqual((install.call_count, banner.update_btn.text()), (0, "Install now"))
+            w.busy = False
+            banner.update_btn.click()
+            _pump(lambda: closed)
+            install.assert_called_once_with("new-version.file")
+            self.assertEqual((banner.head.text(), closed), ("Starting.", [1]))
+            with mock.patch.object(mainwindow.QMessageBox, "warning") as warned:
+                self.assertFalse(w.may_start())  # no broadcast is started while the program is replaced
+            self.assertIn("being installed", warned.call_args[0][2])
+
+    def test_update_download_fails_or_is_cancelled(self):
+        info = updates.release_info({"tag_name": "v9.9.9", "assets": [
+            {"name": n, "browser_download_url": updates.DOWNLOADS + "v9.9.9/" + n}
+            for n in (*updates.ASSETS.values(), updates.SUMS)]})
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(updates, "can_install", return_value=True), \
+                mock.patch.object(updates, "download", side_effect=[updates.Cancelled(), updates.UpdateError("broken")]):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            banner = w.update_banner
+            w.update_found(False, info, None)
+            banner.update_btn.click()  # cancelled: the offer is back
+            _pump(lambda: w.updating is None)
+            self.assertEqual((banner.head.text(), banner.update_btn.isHidden()), ("Version 9.9.9 is available", False))
+            banner.update_btn.click()
+            _pump(lambda: w.updating is None)
+            self.assertEqual((banner.head.text(), banner.sub.text(), banner.page_btn.isHidden()),
+                             ("The update could not be installed", "broken", False))
+            w.update_found(False, {**info, "url": ""}, None)  # no download for this computer: only the page
+            self.assertEqual((banner.update_btn.isHidden(), banner.page_btn.isHidden()), (True, False))
+
     def test_date_field(self):
         f = ui.DateField(D(2026, 11, 15))
         self.assertEqual((f.get(), f.changed), (D(2026, 11, 15), False))
@@ -1573,6 +1767,27 @@ class Windows(unittest.TestCase):
         self.assertEqual((c["target_minutes"], c["theme"], c["end_answer_phrase"]), (45, "light", ""))
         self.assertEqual(c["patriotic_holidays"], ["memorial", "veterans"])
 
+    def test_settings_end_timing_and_update_check(self):
+        """The seconds kept after the pastor's last words and after the congregation's answer."""
+        w = self.wizard()
+        self.assertEqual((w.end_after.text(), w.end_pad.text(), w.check_updates.isChecked()), ("5", "0.5", True))
+        w.end_after.setText("8")
+        w.end_pad.setText("1,5")
+        w.check_updates.setChecked(False)
+        c = w.collect()
+        self.assertEqual((c["end_after_seconds"], c["end_answer_pad"], c["end_alt_pad"], c["check_updates"]),
+                         (8.0, 1.5, 1.5, False))
+        own = self.wizard(end_after_seconds=3, end_answer_pad=0, end_alt_pad=2)  # "and we will" has its own
+        self.assertEqual((own.end_after.text(), own.end_pad.text()), ("3", "0"))
+        own.end_pad.setText("1")
+        self.assertEqual((own.collect()["end_answer_pad"], own.collect()["end_alt_pad"]), (1.0, 2))
+        for bad in ("soon", "-1", "61", "nan"):
+            w.end_pad.setText(bad)
+            self.assertRaises(ValueError, w.collect)
+        w.end_pad.setText("0.5")
+        w.end_after.setText("")
+        self.assertRaises(ValueError, w.collect)
+
     def test_settings_refuse_bad_values(self):
         w = self.wizard()
         w.name.setText("St. John: Radio")
@@ -1648,6 +1863,162 @@ class Windows(unittest.TestCase):
         w.reject()
         self.assertEqual(catalog.load(self.csv)[b]["title"], "")
         self.assertEqual(closed, [None])
+
+
+class Updates(unittest.TestCase):
+    """Looking for a new version, and downloading it: nothing here reaches the internet."""
+
+    def setUp(self):
+        import hashlib
+        import io
+        import updates
+        self.updates, self.io = updates, io
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        env = mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name})
+        env.start()
+        self.addCleanup(env.stop)
+        self.name = updates.ASSETS[updates._platform()]
+        self.file = b"the new version" * 1000
+        self.sums = f"{'0' * 64}  another-file\n{hashlib.sha256(self.file).hexdigest()}  {self.name}\n"
+        self.release = {"tag_name": "v1.4.0", "html_url": f"https://github.com/{updates.REPO}/releases/tag/v1.4.0",
+                        "body": "Intro.\n\n## Install\n\n- not this\n\n## What's new in 1.4.0\n\n"
+                                "- **Zoom.** See it `closer`.\n- See the [README](https://example.org).\n\nMore text.\n",
+                        "assets": [{"name": n, "size": len(self.file),
+                                    "browser_download_url": updates.DOWNLOADS + "v1.4.0/" + n}
+                                   for n in (*updates.ASSETS.values(), updates.SUMS)]}
+
+    def served(self, pages):
+        """updates._open answers from `pages` ({the end of the address: bytes}) instead of the internet."""
+        asked = []
+
+        def _open(url, accept="*/*"):
+            asked.append(url)
+            body = next(v for k, v in pages.items() if url.endswith(k))
+            resp = self.io.BytesIO(body)
+            resp.headers = {"Content-Length": str(len(body))}
+            return resp
+
+        patch = mock.patch.object(self.updates, "_open", _open)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return asked
+
+    def test_versions(self):
+        v = self.updates.version_tuple
+        self.assertEqual((v("1.3.1"), v("v1.10.0"), v(" 2.0.0\n")), ((1, 3, 1), (1, 10, 0), (2, 0, 0)))
+        self.assertEqual((v("development"), v("0.0.0-dev12"), v("1.3"), v(""), v(None)), (None,) * 5)
+        self.assertTrue(v("1.10.0") > v("1.9.9"))
+        with mock.patch.object(paths, "version", return_value="development"):
+            self.assertFalse(self.updates.is_release())
+        with mock.patch.object(paths, "version", return_value="1.3.1"):
+            self.assertTrue(self.updates.is_release())
+        self.assertFalse(self.updates.can_install())  # from source: nothing to put a new version over
+
+    def test_release_info(self):
+        u = self.updates
+        info = u.release_info(self.release, "win32")
+        self.assertEqual((info["version"], info["name"], info["size"]), ("1.4.0", "ChurchRadio-Studio-Setup.exe", 15000))
+        self.assertEqual(info["url"], u.DOWNLOADS + "v1.4.0/ChurchRadio-Studio-Setup.exe")
+        self.assertEqual(info["sums_url"], u.DOWNLOADS + "v1.4.0/SHA256SUMS.txt")
+        self.assertEqual(u.release_info(self.release, "darwin")["name"], "ChurchRadio-Studio-macOS.dmg")
+        self.assertEqual(u.release_info(self.release, "linux")["name"], "ChurchRadio-Studio-Linux-x86_64.tar.gz")
+        self.assertEqual(u.whats_new(info["notes"]), ["•  Zoom. See it closer.", "•  See the README."])
+        self.assertEqual(u.whats_new("No such part."), [])
+        # A file from anywhere else is never taken; nor one that cannot be checked.
+        elsewhere = {**self.release, "html_url": "https://example.org/x", "assets": [
+            {**a, "browser_download_url": "https://example.org/" + a["name"]} for a in self.release["assets"]]}
+        info = u.release_info(elsewhere, "win32")
+        self.assertEqual((info["url"], info["sums_url"], info["page"]), ("", "", u.RELEASES_PAGE))
+        no_sums = {**self.release, "assets": [a for a in self.release["assets"] if a["name"] != u.SUMS]}
+        self.assertEqual(u.release_info(no_sums, "win32")["url"], "")
+        self.assertEqual(u.release_info({"tag_name": "v1.4.0", "assets": None}, "linux")["url"], "")
+
+    def test_check(self):
+        u = self.updates
+        asked = self.served({"/releases/latest": json.dumps(self.release).encode()})
+        self.assertEqual(u.check("1.3.1")["version"], "1.4.0")
+        self.assertEqual(asked, [u.LATEST_URL])
+        self.assertIsNone(u.check("1.4.0"))
+        self.assertIsNone(u.check("1.10.0"))  # (not compared as text)
+        self.assertEqual(u.check("development")["version"], "1.4.0")  # asked for in About, from source
+        self.served({"/releases/latest": b"not json"})
+        self.assertRaises(u.UpdateError, u.check, "1.3.1")
+        self.served({"/releases/latest": json.dumps({"tag_name": "nightly"}).encode()})
+        self.assertRaises(u.UpdateError, u.check, "1.3.1")
+        with mock.patch.object(u, "_open", side_effect=OSError("no route")):
+            with self.assertRaises(u.UpdateError) as e:
+                u.check("1.3.1")
+        self.assertIn("Could not reach GitHub", str(e.exception))
+
+    def test_download_is_checked(self):
+        u = self.updates
+        info = u.release_info(self.release)
+        self.served({u.SUMS: self.sums.encode(), self.name: self.file})
+        seen = []
+        path = u.download(info, lambda got, total: seen.append((got, total)))
+        self.assertEqual((path, seen[-1]), (os.path.join(self.dir.name, "update", self.name), (15000, 15000)))
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(), self.file)
+        self.assertEqual(os.listdir(u.folder()), [self.name])  # (no .part left)
+
+        self.served({u.SUMS: self.sums.encode(), self.name: self.file + b"!"})  # changed on the way
+        with self.assertRaises(u.UpdateError) as e:
+            u.download(info)
+        self.assertIn("does not match its checksum", str(e.exception))
+        self.assertFalse(os.path.exists(u.folder()))  # the bad file, and the good one before it, are gone
+
+        self.served({u.SUMS: b"no sums here", self.name: self.file})
+        self.assertRaises(u.UpdateError, u.download, info)
+        self.served({u.SUMS: self.sums.encode(), self.name: self.file})
+        self.assertRaises(u.Cancelled, u.download, info, None, lambda: True)
+        self.assertFalse(os.path.exists(u.folder()))
+        asked = self.served({})
+        for bad in ({**info, "url": ""}, {**info, "url": "https://example.org/" + self.name},
+                    {**info, "sums_url": "https://example.org/SHA256SUMS.txt"}):
+            self.assertRaises(u.UpdateError, u.download, bad)
+        self.assertEqual(asked, [])  # nothing was asked of another site
+
+    def test_checksum_lines(self):
+        e = self.updates.expected_sum
+        a, b = "a" * 64, "B" * 64
+        text = f"{a}  ChurchRadio-Studio-Setup.exe\n{b} *ChurchRadio-Studio-macOS.dmg\nshort  x\n"
+        self.assertEqual((e(text, "ChurchRadio-Studio-Setup.exe"), e(text, "ChurchRadio-Studio-macOS.dmg")),
+                         (a, b.lower()))
+        self.assertEqual((e(text, "x"), e(text, "Setup.exe"), e("", "x")), ("", "", ""))
+
+    @unittest.skipIf(sys.platform == "win32", "the Linux way of installing")
+    def test_linux_install(self):
+        """The download is unpacked, its install.sh is run and the new program is started."""
+        import tarfile
+        u = self.updates
+        src = os.path.join(self.dir.name, "src", "ChurchRadio-Studio")
+        os.makedirs(src)
+        dest = os.path.join(self.dir.name, "installed")
+        with open(os.path.join(src, "install.sh"), "w", encoding="utf-8") as fh:
+            fh.write(f'mkdir -p "{dest}" && echo new > "{dest}/ChurchRadio-Studio"\n')
+        os.makedirs(u.folder())
+        tar_path = os.path.join(u.folder(), u.ASSETS["linux"])
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(src, "ChurchRadio-Studio")
+        with mock.patch.object(u, "linux_installed_dir", return_value=dest), \
+                mock.patch.object(u, "_start") as start:
+            text = u._install_linux(tar_path)
+        self.assertIn("installed", text)
+        start.assert_called_once_with(os.path.join(dest, "ChurchRadio-Studio"))
+        self.assertTrue(os.path.isfile(os.path.join(dest, "ChurchRadio-Studio")))
+        with open(os.path.join(src, "install.sh"), "w", encoding="utf-8") as fh:
+            fh.write("echo no room >&2; exit 3\n")
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(src, "ChurchRadio-Studio")
+        with mock.patch.object(u, "_start") as start:
+            with self.assertRaises(u.UpdateError) as e:
+                u._install_linux(tar_path)
+        self.assertIn("no room", str(e.exception))
+        start.assert_not_called()
+        with open(tar_path, "wb") as fh:
+            fh.write(b"not a tar file")
+        self.assertRaises(u.UpdateError, u._install_linux, tar_path)
 
 
 class ImportSongList(unittest.TestCase):

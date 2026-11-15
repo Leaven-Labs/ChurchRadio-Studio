@@ -80,6 +80,13 @@ item. Remove it from this file once it is built.
   panels; ruled lists) in the app's own colours. The icon is a radio set with a cross for its dial;
   `assets/icon.ico` holds a thicker drawing for 40 pixels and smaller. Leaven Labs' address is
   `https://www.leavenlabs.org` (with the `www`).
+- **Motion on the three websites (November 2026).** The maintainer chose these from a mockup: the glow
+  behind the big screenshot (`.halo`), the band of light on the gradient word (`.gradtext`) and the step
+  numbers, the hour that fills once in the hero (this site), the download panel's glows that drift, the
+  button's glow that breathes, and the reading line at the top (`.progress`). One script at the end of the
+  page gives each `data-scroll` piece `--p` (how far it has gone through the window); with "reduce motion"
+  all stays still. Turned down as too much, do not add unasked: gradient rules drawn over lists, and a
+  glowing comet round a card's edge.
 - Download size matters to the maintainer. The cheapest saving, on any toolkit, is a smaller ffmpeg
   for Windows and Linux (built with only what the app uses, as the Mac job already does).
 

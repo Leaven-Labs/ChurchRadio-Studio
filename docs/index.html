@@ -24,13 +24,14 @@
     --g1: #1f3a68; --g2: #2f6fd0; --g3: #2aa98c; --spark: #f2c14e; --panel: #152848;
     --intro: #8b6fe0; --song: #2aa98c;
     --shadow: 0 1px 2px rgba(23, 37, 68, .06), 0 18px 40px rgba(23, 37, 68, .12);
+    --p: .5; --page: 0; --glow: .75; --glint: var(--spark);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #14171c; --surface: #1f232d; --ink: #e8ebf0; --sub: #a3acba; --line: #2c323d; --wash: #191d25;
       --accent: #7aa8ee; --t1: #7aa8ee; --t2: #45c4a8; --bar-text: #0f1522; --service: #5b93e8;
       --intro: #a78bfa; --song: #45c4a8;
-      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px rgba(0, 0, 0, .4);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px rgba(0, 0, 0, .4); --glow: .6;
     }
   }
   :root {
@@ -55,8 +56,11 @@
              margin-bottom: 12px; }
   .eyebrow a { color: inherit; text-decoration: none; }
   .eyebrow a:hover { text-decoration: underline; }
-  .gradtext { background: linear-gradient(100deg, var(--t1), var(--t2)); -webkit-background-clip: text;
-              background-clip: text; color: transparent; }
+  .gradtext { background: linear-gradient(100deg, transparent 42%, var(--glint) 50%, transparent 58%) 100% 0 / 250% 100% no-repeat,
+                          linear-gradient(100deg, var(--t1), var(--t2));
+              -webkit-background-clip: text; background-clip: text; color: transparent;
+              animation: sweep 7s ease-in-out 1s infinite; }
+  @keyframes sweep { 0%, 55% { background-position: 100% 0, 0 0; } 100% { background-position: 0% 0, 0 0; } }
 
   /* top bar */
   header.top .wrap { display: flex; align-items: center; gap: 12px 28px; flex-wrap: wrap; padding-top: 22px;
@@ -124,8 +128,10 @@
   .steps li { border-top: 1px solid var(--line); padding: 20px 0 26px; counter-increment: step; display: grid;
               gap: 8px; align-content: start; }
   .steps li::before { content: counter(step); font: 600 2.7rem/1 var(--display); justify-self: start;
-                      background: linear-gradient(100deg, var(--t1), var(--t2)); -webkit-background-clip: text;
-                      background-clip: text; color: transparent; }
+                      background: linear-gradient(100deg, transparent 42%, var(--glint) 50%, transparent 58%)
+                                    calc((1 - var(--p)) * 100%) 0 / 250% 100% no-repeat,
+                                  linear-gradient(100deg, var(--t1), var(--t2));
+                      -webkit-background-clip: text; background-clip: text; color: transparent; }
   .steps p, .feat p { color: var(--sub); font-size: 16px; }
 
   .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 44px; margin-top: 40px; }
@@ -148,8 +154,8 @@
   /* download: one dark panel, the same in both themes */
   .dl { position: relative; isolation: isolate; overflow: hidden; margin-top: 84px; border-radius: 28px;
         padding: clamp(26px, 5vw, 52px); color: #fff;
-        background: radial-gradient(60% 90% at 100% 0%, color-mix(in srgb, var(--g2) 60%, transparent), transparent 70%),
-                    radial-gradient(50% 80% at 0% 100%, color-mix(in srgb, var(--g3) 45%, transparent), transparent 70%),
+        background: radial-gradient(60% 90% at calc(100% - var(--p) * 70%) calc(var(--p) * 40%), color-mix(in srgb, var(--g2) 60%, transparent), transparent 70%),
+                    radial-gradient(50% 80% at calc(var(--p) * 70%) calc(100% - var(--p) * 40%), color-mix(in srgb, var(--g3) 45%, transparent), transparent 70%),
                     var(--panel); }
   .dl p { color: #d6dbea; max-width: 64ch; margin-top: 12px; }
   .dl a { color: var(--spark); }
@@ -189,9 +195,42 @@
                         font: 600 1.7rem/1 var(--display); font-variant-numeric: tabular-nums; }
   .hour li:last-child::before { display: none; }
   .hour li:last-child::after { content: " on the air"; font: 500 15px var(--body); color: var(--sub); }
+
+  /* Motion (the script at the end of the page gives each marked piece --p, and the page --page).
+     Halo: a blurred copy of the gradient behind a panel, brightest at mid-window. */
+  .progress { position: fixed; inset: 0 0 auto; height: 3px; z-index: 11; background: var(--grad);
+              transform: scaleX(var(--page)); transform-origin: left; pointer-events: none; }
+  .halo { position: relative; isolation: isolate; min-width: 0;
+          --bell: calc(1 - max(2 * var(--p) - 1, 1 - 2 * var(--p))); }
+  .halo::before { content: ""; position: absolute; z-index: -1; inset: 10% 2% -4%; border-radius: 48px;
+                  background: linear-gradient(100deg, var(--g1), var(--g2), var(--g3), var(--g2), var(--g1));
+                  background-size: 300% 100%; background-position: calc(var(--p) * 100%) 0;
+                  filter: blur(42px); opacity: calc((.15 + var(--bell) * .85) * var(--glow));
+                  transform: translateY(calc(40px - var(--bell) * 22px)) scale(calc(.9 + var(--bell) * .12)); }
+  .btn.primary::after, .dl .btn.gold::after, .dl .btn.main::after { animation: breathe 3.6s ease-in-out infinite alternate; }
+  .btn.primary:hover::after, .dl .btn.gold:hover::after, .dl .btn.main:hover::after { animation-duration: 1.2s; }
+  @keyframes breathe { from { opacity: .35; transform: scaleX(.8); } to { opacity: 1; transform: scaleX(1.08); } }
+  .dl .btn.gold, .dl .btn.main { position: relative; }
+  .dl .btn.gold::after, .dl .btn.main::after { content: ""; position: absolute; inset: auto 10px -7px; height: 16px;
+                                               border-radius: 50%; background: var(--spark); filter: blur(14px);
+                                               z-index: -1; }
+  /* The hour in the hero fills once, behind a gold needle, as it does in the app. */
+  .hour .track { position: relative; border-radius: 12px; background: var(--line); }
+  .hour .bar { animation: fill 2.6s ease-out .4s both; }
+  .hour .needle { position: absolute; top: -7px; bottom: -7px; left: 100%; width: 3px; margin-left: -1.5px; opacity: 0;
+                  border-radius: 2px; background: var(--spark); box-shadow: 0 0 14px 3px var(--spark);
+                  animation: needle 2.9s .4s both; }
+  @keyframes fill { from { clip-path: inset(0 100% 0 0 round 12px); } to { clip-path: inset(0 0 0 0 round 12px); } }
+  @keyframes needle { 0% { left: 0; opacity: 1; animation-timing-function: ease-out; } 90% { left: 100%; opacity: 1; }
+                      100% { left: 100%; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .gradtext, .btn.primary::after, .dl .btn.gold::after, .dl .btn.main::after, .hour .bar, .hour .needle { animation: none; }
+    .progress { display: none; }
+  }
 </style>
 </head>
 <body>
+<div class="progress" aria-hidden="true"></div>
 
 <header class="top">
   <div class="wrap">
@@ -224,24 +263,26 @@
     </div>
     <div class="panel">
     <div class="demo hour" role="img" aria-label="One hour of broadcast: a short intro, then the service, then songs that fill the rest, 59 minutes 58 seconds in all">
-      <div class="bar"><span class="i">Intro</span><span class="s">The service</span><span class="g">Songs</span></div>
+      <div class="track"><div class="bar"><span class="i">Intro</span><span class="s">The service</span><span class="g">Songs</span></div><i class="needle"></i></div>
       <ol>
         <li style="--c: var(--intro)">Your intro</li>
         <li style="--c: var(--service)">The service, cut at its start and end</li>
         <li style="--c: var(--song)">Songs that fill the rest</li>
-        <li>59:58</li>
+        <li><span id="clock">59:58</span></li>
       </ol>
     </div>
     </div>
   </div>
 
   <div class="wrap">
+    <div class="halo" data-scroll>
     <div class="stage">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="screenshots/broadcast-dark.png">
         <img src="screenshots/broadcast.png" width="2360" height="2020"
              alt="The Broadcast page after a broadcast is made: the finished MP3, where the service was cut, the hour and the progress list">
       </picture>
+    </div>
     </div>
   </div>
 
@@ -250,10 +291,10 @@
     <h2>A few minutes each week</h2>
     <p class="intro">The app listens to the recording, so nobody has to sit with an audio editor on Sunday afternoon.</p>
     <ol class="steps">
-      <li><h3>Drop the recording</h3><p>An MKV, MP4, WAV, MP3 or M4A file, straight from the camera or the sound desk.</p></li>
-      <li><h3>The app finds the service</h3><p>It hears your opening words and the congregation's last answer, and cuts there.</p></li>
-      <li><h3>It fills the hour</h3><p>Your own songs are added until the broadcast is as long as your slot.</p></li>
-      <li><h3>Send the MP3</h3><p>One file, named with your program and the date, ready for the station.</p></li>
+      <li data-scroll><h3>Drop the recording</h3><p>An MKV, MP4, WAV, MP3 or M4A file, straight from the camera or the sound desk.</p></li>
+      <li data-scroll><h3>The app finds the service</h3><p>It hears your opening words and the congregation's last answer, and cuts there.</p></li>
+      <li data-scroll><h3>It fills the hour</h3><p>Your own songs are added until the broadcast is as long as your slot.</p></li>
+      <li data-scroll><h3>Send the MP3</h3><p>One file, named with your program and the date, ready for the station.</p></li>
     </ol>
   </section>
 
@@ -355,7 +396,7 @@
   </section>
 
   <div class="wrap">
-    <section class="dl" id="download">
+    <section class="dl" id="download" data-scroll>
       <h2>Download ChurchRadio Studio</h2>
       <p>Free for any church. These links always give the newest release. The first start needs internet once,
         to download the speech models (about 620 MB); after that the app works offline.</p>
@@ -396,5 +437,45 @@
   </div>
 </footer>
 
+<script>
+  // Motion. Each piece marked data-scroll is told how far it has travelled through the window
+  // (--p: 0 = coming in at the bottom, 1 = gone at the top), and the page how far it has been read
+  // (--page). The CSS does the rest. With "reduce motion" set, nothing is measured and all stays still.
+  (function () {
+    var root = document.documentElement, still = matchMedia("(prefers-reduced-motion: reduce)");
+    var pieces = [].slice.call(document.querySelectorAll("[data-scroll]")), waiting = false;
+    function measure() {
+      waiting = false;
+      if (still.matches) return;
+      var h = innerHeight, far = root.scrollHeight - h;
+      root.style.setProperty("--page", far > 0 ? Math.min(1, scrollY / far).toFixed(4) : "0");
+      pieces.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (r.bottom < -h || r.top > 2 * h) return;
+        el.style.setProperty("--p", Math.min(1, Math.max(0, (h - r.top) / (h + r.height))).toFixed(4));
+      });
+    }
+    function ask() { if (!waiting) { waiting = true; requestAnimationFrame(measure); } }
+    addEventListener("scroll", ask, { passive: true });
+    addEventListener("resize", ask);
+    addEventListener("load", ask);
+    ask();
+
+    // The hero's clock counts up while the hour fills (the same 2.6 seconds as the CSS).
+    var clock = document.getElementById("clock");
+    if (clock && !still.matches) {
+      var begin = null;
+      clock.textContent = "0:00";
+      setTimeout(function tick() {
+        requestAnimationFrame(function (now) {
+          if (begin === null) begin = now;
+          var t = Math.min(1, (now - begin) / 2600), s = Math.round(3598 * (1 - Math.pow(1 - t, 1.7)));
+          clock.textContent = Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2);
+          if (t < 1) tick();
+        });
+      }, 400);
+    }
+  })();
+</script>
 </body>
 </html>

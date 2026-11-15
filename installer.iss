@@ -74,6 +74,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
+; An update started from inside the app (updates.py runs Setup with /SILENT /RELAUNCH=1): there is
+; no last page to tick "Start now" on, so the app is started again here, as the person and not
+; as the administrator Setup may run as. Other silent installs (no /RELAUNCH=1) start nothing.
+Filename: "{app}\{#AppExe}"; Flags: nowait skipifnotsilent runasoriginaluser; Check: RelaunchAsked
 
 [Code]
 const
@@ -82,6 +86,12 @@ const
 
 var
   OldDir: String;
+
+// True when Setup was started with /RELAUNCH=1 (by the app's own update).
+function RelaunchAsked(): Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
 
 // The folder of the existing installation, or '' if there is none.
 function PreviousAppDir(): String;

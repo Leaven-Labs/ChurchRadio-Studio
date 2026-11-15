@@ -37,8 +37,9 @@ The app is **light or dark**, as your computer is set (or as you choose in Setti
 </p>
 
 Everything runs **on your own computer**. The speech recognition is downloaded once and then works
-offline. Nothing about your services leaves the computer; the only thing that ever does is a song's
-title, when you look songs up with **Check public domain**.
+offline. Nothing about your services leaves the computer. The only things that ever do are a song's
+title, when you look songs up with **Check public domain**, and a question to GitHub for the newest
+version's number when the app starts ([Updating](#updating); it can be turned off).
 
 Created by **Aaron Steger** for **Bethany Lutheran Church**, Fredericksburg, Texas, and shared so
 other congregations can use it. Published by [Leaven Labs](https://leavenlabs.org) under the
@@ -151,6 +152,12 @@ dim parts before and after are cut off.
 - **Drag a marker** to move a cut, or use the buttons under the picture (**−5 s**, **−1 s**, **+1 s**,
   **+5 s**; left for the start, right for the end). A marker at the very start or end of the
   recording cuts nothing there.
+- **Type a time** in the **Start** or **End** box (`9:02`, `9:02.4` or `1:08:15`) and press Enter.
+  Empty the box to cut nothing there.
+- **Zoom** into the picture with **+** and **−**, or hold **Ctrl** and turn the mouse wheel where you
+  want to look. **Start cut** and **End cut** show two minutes around a cut; **Whole recording**
+  zooms all the way out. Zoomed in, the bar under the picture (or a drag of the picture itself) moves
+  along the recording, and a marker that is out of sight waits at the edge of the picture.
 - **Place a cut exactly** in the two **close-ups**. Each shows the 40 seconds around one cut, so the
   pauses between words can be seen. Click or drag there; the time is exact to a tenth of a second.
 - Click **Make the broadcast again**. The app does not listen for the words again, so this is quick,
@@ -419,6 +426,12 @@ hymns; newer songs are listed by title only.
 
 Most settings are on the **Settings** page; click **Save** when you have changed them.
 
+Under **Service words**, two numbers set how much is kept after the words that end the service:
+**Seconds kept after them** (after the pastor's last words, used when the congregation's answer is
+not heard; 5 at first) and **Seconds kept after it** (after the answer; 0.5 at first). Give more
+seconds to keep an Amen or the first notes of the organ, fewer for a tighter end. They change where
+the app puts the end cut by itself; a cut you move by hand is not changed.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
@@ -440,6 +453,7 @@ editor for the rest (close the app first).
 | `song_folders` | (none) | Folders with your songs (folders inside them are included). |
 | `output_folder` | (none) | Where to save the MP3. Empty = next to the recording. |
 | `theme` | `auto` | The app's look: `auto` (as your computer is set), `light` or `dark`. |
+| `check_updates` | `true` | Look for a new version when the app starts. See [Updating](#updating). |
 | `target_minutes` | `60` | Broadcast length. |
 | `tolerance_seconds` | `30` | The songs never make it more than this much longer. |
 | `service_start` | `Auto` | `Auto`, `Organ start` or `Keep start`. |
@@ -449,10 +463,10 @@ editor for the rest (close the app first).
 | `end_phrase` | `Go now in peace` | The pastor's last words. Empty = nothing cut at the end. |
 | `end_answer_phrase` | `Thanks be to God` | The congregation's answer; the cut is right after it. Empty = no answer. |
 | `end_answer_window` | `20` | The answer must start within this many seconds. |
-| `end_answer_pad` | `0.5` | Seconds kept after the answer. |
+| `end_answer_pad` | `0.5` | Seconds kept after the answer (on the Settings page). |
 | `end_alt_phrase` | `and we will` | If the answer isn't heard: cut right after these words, if heard soon after. |
 | `end_alt_window` / `end_alt_pad` | `20` / `0.5` | As above, for `end_alt_phrase`. |
-| `end_after_seconds` | `5` | If neither is heard: cut this long after the pastor's last words. |
+| `end_after_seconds` | `5` | If neither is heard: cut this long after the pastor's last words (on the Settings page). |
 | `end_search_minutes` | `10` | How much of the end is searched. |
 | `max_silence_seconds` / `silence_level_db` | `5` / `-40` | Silences in the service longer and quieter than this are shortened. |
 | `trim_song_silence` / `song_silence_db` | `true` / `-50` | Remove silence quieter than this at the start and end of songs. |
@@ -489,10 +503,28 @@ program; your settings and the models stay for a reinstall.
 
 ## Updating
 
-Download the newest version from the **[Releases](../../releases)** page and install it over the old
-one: run the new installer (Windows), drag the new app onto **Applications** and choose **Replace**
-(Mac), or unpack the new `.tar.gz` and run its `install.sh` (Linux). Your settings, songs, history
-and the speech models are kept.
+When the app starts it asks GitHub for the number of the newest version. If there is a newer one,
+the Broadcast page says so, with **What's new**, **Update now** and **Later**. Nothing is downloaded
+until you click **Update now**:
+
+- **Windows:** the installer is downloaded and run. Windows may ask for permission; the app closes,
+  the new version is installed over the old one and the app opens again.
+- **Linux** (installed with `install.sh`): the download is unpacked and installed, and the new
+  version starts.
+- **Mac:** the disk image is downloaded and opened. Drag ChurchRadio Studio onto **Applications**,
+  choose **Replace** and start it again.
+
+The download is used only if it matches the checksum in the release's `SHA256SUMS.txt`. An update
+waits while a broadcast is being made. Your settings, songs, history and the speech models are kept.
+
+To look by hand, click **About → Check for updates**. To stop the app from asking at the start, untick
+**Settings → Your broadcast → Look for a new version when the app starts**. The question holds only
+the app's version number; nothing about your services, songs or settings is sent.
+
+You can also update by hand, as before: download the newest version from the
+**[Releases](../../releases)** page and install it over the old one (run the installer on Windows,
+drag the app onto **Applications** on a Mac, or unpack the `.tar.gz` and run its `install.sh` on
+Linux).
 
 ## Troubleshooting
 
@@ -587,6 +619,7 @@ their own setting. Run the script again after the look of the app changes.
 | `mainwindow.py` | The main window: the menu at the left, the Broadcast and History pages. |
 | `ui.py` | The look: colours, the style sheet, the service date box, the picture of the recording and the close-ups. |
 | `player.py` | Plays a piece of the recording (the cuts) with the system's own sound player. |
+| `updates.py` | Looks for a new version on GitHub, downloads it, checks it and starts its installer. |
 | `cli.py` | `--build`: making the broadcast with no window. |
 | `setup_wizard.py` | The setup wizard and the Settings page. |
 | `songs_window.py` | The Songs page. |

@@ -10,15 +10,13 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.3.0
+## What's new in 1.4.0
 
-- **Cancel.** A **Cancel** button next to the progress bar stops a broadcast that is being made, at once or after a few seconds. Nothing is saved, and cuts that were already found are kept.
-- **The finished broadcast on the page.** Instead of a pop-up, a card shows the MP3 with its length and folder, with **Play** and **Show in folder**. If the broadcast is too long, the card says by how much.
-- **Close-ups of the cuts.** Under the picture of the recording, each cut is shown from near (the 40 seconds around it). Click or drag there to put a cut in the pause between two words, exact to a tenth of a second.
-- **The date in the file name.** **Settings → Your broadcast → Date in the file name**: choose **Short** (`2026-11-15`, `11-15-2026`, `15.11.2026`, `20261115` and more) or **Long** (`November 15, 2026`, `15 Nov 2026`, `Sunday, November 15, 2026` and more). The file name stays as it was until you change it.
-- **The MP3's title now writes the date the same way as the file name**: `Church Radio Broadcast 2026-11-15`, where it was `11/15/2026`.
-- **No half-written MP3.** The MP3 gets its name only when it is whole. A run that fails or is stopped leaves no file that a scheduled run would take for a finished broadcast, and does not damage the broadcast made before.
+- **Zoom into the recording.** Under the picture of the recording: **+** and **−** (or hold **Ctrl** and turn the mouse wheel), **Start cut** and **End cut** to look at a cut from near, and **Whole recording**. Zoomed in, a bar under the picture moves along the recording, and a marker can be dragged to a fraction of a second.
+- **Type a cut's time.** The **Start** and **End** boxes under the picture show where the cuts are. Type a time (`9:02`, `9:02.4`, `1:08:15`) and press Enter to put a cut there; empty the box to cut nothing. The app still finds both cuts by itself first, as before.
+- **How much is kept at the end.** **Settings → Service words** has two new numbers: the seconds kept after the pastor's last words (5 at first) and after the congregation's answer (0.5 at first).
+- **Updates from inside the app.** When the app starts it asks GitHub whether there is a newer version, and the Broadcast page offers **Update now**. On Windows and Linux the new version is downloaded, checked against its checksum and installed over this one, and the app opens again; on a Mac the download is opened for you to drag onto Applications. **About → Check for updates** looks when you ask. To turn the check at the start off: **Settings → Your broadcast → Look for a new version when the app starts**. Only the app's version number is sent.
 
-If the computer makes the broadcast by itself (`--build`): it knows a broadcast is made by its file name. After you change the date format, the next run makes the newest recording's broadcast once more, under the new name.
+The first update that can be done from inside the app is the one after 1.4.0: install this version by hand once more. The long date in the file name (`November 15, 2026`) is under **Settings → Your broadcast → Date in the file name → Long**, as since 1.3.0.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

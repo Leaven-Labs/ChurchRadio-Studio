@@ -154,6 +154,20 @@ class SettingsForm(QWidget):
         intro = self.intro.text().strip()
         if intro and not os.path.isfile(intro):
             raise ValueError(f"The intro file was not found:\n{intro}")
+        try:
+            after, pad = float(self.end_after.text().replace(",", ".")), float(self.end_pad.text().replace(",", "."))
+        except ValueError:
+            raise ValueError("The seconds kept after the pastor's last words and after the congregation's answer "
+                             "must be numbers, for example 5 or 0.5.")
+        if not (0 <= after <= 60 and 0 <= pad <= 60):  # (not: nan)
+            raise ValueError("The seconds kept after the pastor's last words and after the congregation's answer "
+                             "must be 0 to 60.")
+        # "and we will" is an answer of the congregation too: it keeps the same seconds, unless
+        # config.json gives it its own.
+        old_pad = c.get("end_answer_pad", prelude.END_ANSWER_PAD)
+        if c.get("end_alt_pad", prelude.END_ALT_PAD) == old_pad:
+            c["end_alt_pad"] = pad
+        c.update(end_after_seconds=after, end_answer_pad=pad, check_updates=self.check_updates.isChecked())
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
                  date_format=self.date_format.currentData() or builder.DATE_FORMAT,
                  output_folder=self.output.text().strip(), intro=intro,
@@ -266,6 +280,11 @@ class SettingsForm(QWidget):
         theme = c.get("theme", "auto")
         self.theme.setCurrentIndex(ui.THEMES.index(theme) if theme in ui.THEMES else 0)
         self.row("The app's look:", self.theme, "light or dark", width=200)
+        self.check_updates = QCheckBox("Look for a new version when the app starts")
+        self.check_updates.setChecked(bool(c.get("check_updates", True)))
+        self.check_updates.setToolTip("Asks github.com for the newest version's number. Nothing about your "
+                                      "services or songs is sent.")
+        self.body.addWidget(self.check_updates)
 
     def show_date_formats(self, chosen=None):
         """List the date formats of the style chosen (Short or Long), each as the example date."""
@@ -367,10 +386,17 @@ class SettingsForm(QWidget):
         self.row("The service starts with:", self.start_phrase, 'e.g. "Good morning"', width=260)
         self.row("Before those words:", self.service_start, "Auto = cut the organ prelude but keep a choir song",
                  width=140)
+        # How long the recording goes on after the words that end it (end_after_seconds,
+        # end_answer_pad in config.json).
+        self.end_after = QLineEdit(f"{c.get('end_after_seconds', prelude.END_AFTER_SEC):g}")
+        self.end_pad = QLineEdit(f"{c.get('end_answer_pad', prelude.END_ANSWER_PAD):g}")
         self.row("The pastor's last words:", self.end_phrase, 'e.g. "Go now in peace"', width=260)
-        self.row("The congregation answers:", self.end_answer, "the cut is right after this", width=260)
+        self.row("Seconds kept after them:", self.end_after, "used when the answer is not heard", width=70)
+        self.row("The congregation answers:", self.end_answer, "the cut is after this", width=260)
+        self.row("Seconds kept after it:", self.end_pad, "0 = cut right at the last word", width=70)
         self.body.addWidget(ui.label("Leave the answer empty if your congregation does not answer; the "
-                                     "cut is then a few seconds after the pastor's last words.", "hint", wrap=True))
+                                     "cut is then after the pastor's last words. More seconds keep more of "
+                                     "what follows (an Amen, the first notes of the organ).", "hint", wrap=True))
         self.body.addSpacing(6)
         box = QGroupBox("Patriotic songs play only on the weekend of:")
         inside = QVBoxLayout(box)

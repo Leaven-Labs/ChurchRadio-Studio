@@ -3,6 +3,7 @@
 theme in config.json: "auto" (follow the system), "light" or "dark".
 """
 import os
+import re
 
 from PySide6.QtCore import QDate, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPainterPath, QPen,
@@ -126,6 +127,7 @@ QScrollBar:vertical {{ background: transparent; width: 12px; margin: 4px 2px; }}
 QScrollBar::handle:vertical {{ background: {c['softline']}; border-radius: 4px; min-height: 30px; }}
 QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px 4px; }}
 QScrollBar::handle:horizontal {{ background: {c['softline']}; border-radius: 4px; min-width: 30px; }}
+QScrollBar#track:horizontal {{ background: {c['line']}; border-radius: 4px; height: 8px; margin: 0; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QCalendarWidget QWidget {{ alternate-background-color: {c['card']}; }}
@@ -409,27 +411,37 @@ def clock(sec):
 
 class Waveform(QWidget):
     """The recording drawn as its loudness along its length, with the two cuts marked: the part
-    that is broadcast is bright, what is cut off before the start and after the end is dim."""
+    that is broadcast is bright, what is cut off before the start and after the end is dim.
+
+    It shows the whole recording, or (zoomed in) a part of it: zoom(), zoom_to(), show_all();
+    Ctrl + the mouse wheel zooms where the pointer is, and a drag beside the cuts moves the part
+    shown."""
     TOP, BOTTOM = 30, 24  # room for the cut labels above the wave and the times under it
     GRAB = 9              # a click this many pixels from a cut's line takes hold of it
     APART = 30.0          # the cuts stay at least this many seconds apart
-    moved = Signal(str)   # the person moved a cut ("start" or "end"): with the mouse, or nudge()
+    MIN_SPAN = 10.0       # zoomed in as far as it goes: this many seconds across the picture
+    CUT_SPAN = 120.0      # zoom_to: this many seconds around a cut
+    moved = Signal(str)   # the person moved a cut ("start" or "end"): mouse, nudge() or place()
     changed = Signal()    # what is drawn changed (the close-ups of the cuts draw themselves again)
+    viewed = Signal()     # the part of the recording shown changed (zoom, scroll)
 
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(self.TOP + 72 + self.BOTTOM)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMouseTracking(True)
-        self.editable, self.drag = False, None
+        self.editable, self.drag, self.pan, self.view = False, None, None, None
         self.reset()
 
     def reset(self):
         """A new recording: nothing is known yet."""
         self.levels, self.length, self.cuts, self.note = None, 0.0, {}, "Reading the recording ..."
         self.detail, self.per_second = None, 0  # the loudness in small slices, for the close-ups
-        self.drag = None
+        self.drag = self.pan = None
+        was, self.view = self.view, None  # zoomed in: (the first second shown, how many seconds)
         self.redraw()
+        if was:
+            self.viewed.emit()
 
     def redraw(self):
         self.update()
@@ -447,12 +459,65 @@ class Waveform(QWidget):
             self.unsetCursor()
         self.changed.emit()
 
-    def cut_x(self, which):
-        """Where the line of a cut is drawn (a cut that cuts nothing: at that end of the picture)."""
+    # ---- the part of the recording shown ------------------------------------------------
+    def zoomed(self):
+        return self.view is not None
+
+    def first(self):
+        """The second at the left edge."""
+        return self.view[0] if self.view else 0.0
+
+    def span(self):
+        """How many seconds are shown across the picture."""
+        return self.view[1] if self.view else self.length
+
+    def x_of(self, sec):
+        return (sec - self.first()) / self.span() * self.width() if self.length else 0.0
+
+    def seconds_at(self, x):
+        return self.first() + x / max(1, self.width()) * self.span()
+
+    def show_part(self, first, span):
+        """Show `span` seconds from second `first` (kept inside the recording)."""
+        if not self.length:
+            return
+        span = min(max(span, self.MIN_SPAN), self.length)
+        view = None if span >= self.length - 0.01 else (min(max(first, 0.0), self.length - span), span)
+        if view != self.view:
+            self.view = view
+            self.redraw()
+            self.viewed.emit()
+
+    def zoom(self, factor, around=None):
+        """Zoom in (factor below 1) or out. around: the second that stays where it is (the middle
+        of the picture if not given)."""
+        if not self.length:
+            return
+        span = self.span()
+        around = self.first() + span / 2 if around is None else around
+        new = min(max(span * factor, self.MIN_SPAN), self.length)
+        self.show_part(around - (around - self.first()) / span * new, new)
+
+    def zoom_to(self, which):
+        """Show a cut from near: CUT_SPAN seconds with the cut in the middle (or as much closer
+        as the picture already is)."""
+        span = min(self.span(), self.CUT_SPAN)
+        self.show_part(self.cut_at(which) - span / 2, span)
+
+    def show_all(self):
+        self.show_part(0.0, self.length)
+
+    # ---- the cuts -----------------------------------------------------------------------
+    def cut_at(self, which):
+        """The second a cut is at (a cut that cuts nothing: the very start or end of the recording)."""
         at = self.cuts.get(which)
-        if which == "start":
-            return self.width() * min(max((at or 0.0) / self.length, 0.0), 1.0) if self.length else 0.0
-        return self.width() * min(max(at / self.length, 0.0), 1.0) if at and self.length else float(self.width())
+        return at if at else 0.0 if which == "start" else self.length
+
+    def cut_x(self, which):
+        """Where the line of a cut is drawn (left of 0 or right of the width: not in the part shown)."""
+        if not self.length:
+            return 0.0 if which == "start" else float(self.width())
+        return self.x_of(min(max(self.cut_at(which), 0.0), self.length))
 
     def move_cut(self, which, seconds):
         """Put a cut at `seconds`, kept inside the recording and apart from the other cut. At the
@@ -470,9 +535,12 @@ class Waveform(QWidget):
 
     def nudge(self, which, seconds):
         """Move a cut a little earlier (-) or later (+)."""
+        self.place(which, self.cut_at(which) + seconds)
+
+    def place(self, which, seconds):
+        """The person puts a cut at `seconds` (a time typed, or a nudge)."""
         if self.editable and self.known():
-            now = self.cuts.get(which)
-            self.move_cut(which, (now if now is not None else 0.0 if which == "start" else self.length) + seconds)
+            self.move_cut(which, seconds)
             self.moved.emit(which)
 
     def cut_near(self, x):
@@ -484,21 +552,47 @@ class Waveform(QWidget):
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
-            self.drag = self.cut_near(event.position().x())
+            x = event.position().x()
+            self.drag = self.cut_near(x)
+            if not self.drag and self.zoomed():  # beside the cuts: take hold of the picture
+                self.pan = (x, self.first())
+                self.setCursor(Qt.ClosedHandCursor)
 
     def mouseMoveEvent(self, event):  # noqa: N802
         x = event.position().x()
         if self.drag and self.width():
-            self.move_cut(self.drag, x / self.width() * self.length)
+            self.move_cut(self.drag, self.seconds_at(x))
+        elif self.pan and self.width():
+            self.show_part(self.pan[1] - (x - self.pan[0]) / self.width() * self.span(), self.span())
         elif self.cut_near(x):
             self.setCursor(Qt.SizeHorCursor)
+        elif self.zoomed():
+            self.setCursor(Qt.OpenHandCursor)
         else:
             self.unsetCursor()
 
     def mouseReleaseEvent(self, event):  # noqa: N802
-        if self.drag and event.button() == Qt.LeftButton:
+        if event.button() != Qt.LeftButton:
+            return
+        if self.drag:
             which, self.drag = self.drag, None
             self.moved.emit(which)
+        if self.pan:
+            self.pan = None
+            self.setCursor(Qt.OpenHandCursor)
+
+    def wheelEvent(self, event):  # noqa: N802
+        """Ctrl + wheel zooms where the pointer is; zoomed in, Shift + wheel (or a sideways
+        wheel) moves along the recording. A plain wheel scrolls the page, as everywhere."""
+        up, side = event.angleDelta().y(), event.angleDelta().x()
+        if self.length and up and event.modifiers() & Qt.ControlModifier:
+            self.zoom(0.8 if up > 0 else 1.25, self.seconds_at(event.position().x()))
+        elif self.zoomed() and (side or (up and event.modifiers() & Qt.ShiftModifier)):
+            self.show_part(self.first() - (side or up) / 120 * self.span() / 8, self.span())
+        else:
+            event.ignore()
+            return
+        event.accept()
 
     def set_levels(self, levels, detail=None, per_second=0):
         """levels: numbers 0..1 along the recording, or None if it failed; detail: the same in small
@@ -510,6 +604,9 @@ class Waveform(QWidget):
 
     def set_length(self, seconds):
         self.length = max(0.0, seconds or 0.0)
+        if self.view and self.view[0] + self.view[1] > self.length:
+            self.view = None
+            self.viewed.emit()
         self.redraw()
 
     def set_cut(self, which, seconds):
@@ -517,11 +614,24 @@ class Waveform(QWidget):
         self.cuts[which] = seconds or None
         self.redraw()
 
+    def level(self, a, b):
+        """The loudness (0..1) from second a to b: from the small slices when the picture is
+        zoomed in further than the outline of the whole recording shows."""
+        n = len(self.levels)
+        if self.detail and b - a < self.length / n:
+            i = int(a * self.per_second)
+            some = self.detail[i:max(i + 1, int(b * self.per_second))]
+            return sum(some) / len(some) if some else 0.0
+        return self.levels[min(n - 1, max(0, int(a / self.length * n)))] if self.length else 0.0
+
     def steps(self):
-        """The times written under the wave: at most six, at round minutes."""
-        for minutes in (1, 2, 5, 10, 15, 30, 60, 120):
-            if self.length / (minutes * 60) <= 5.5:
-                return [t * minutes * 60 for t in range(int(self.length // (minutes * 60)) + 1)]
+        """The times written under the wave: at most six, at round minutes (zoomed in: at round
+        seconds too)."""
+        sizes = (60, 120, 300, 600, 900, 1800, 3600, 7200)
+        first, span = self.first(), self.span()
+        for step in ((1, 2, 5, 10, 15, 30) + sizes) if self.zoomed() else sizes:
+            if span / step <= 5.5:
+                return [t * step for t in range(int(-(-first // step)), int((first + span) // step) + 1)]
         return [0]
 
     def paintEvent(self, _event):  # noqa: N802
@@ -530,18 +640,19 @@ class Waveform(QWidget):
         w, mid_h = float(self.width()), self.height() - self.TOP - self.BOTTOM
         wave = QRectF(0, self.TOP, w, mid_h)
         length = self.length
-        x_of = (lambda sec: w * min(max(sec / length, 0.0), 1.0)) if length else (lambda sec: 0.0)
-        start, end, known = self.cut_x("start"), self.cut_x("end"), bool(length) and bool(self.cuts)
+        known = bool(length) and bool(self.cuts)
+        start, end = self.cut_x("start"), self.cut_x("end")
+        cut_from, cut_to = min(max(start, 0.0), w), min(max(end, 0.0), w)  # (of the part shown)
 
-        for part in ((0.0, start), (end, w)) if known else ():  # what is cut off: a darker ground
+        for part in ((0.0, cut_from), (cut_to, w)) if known else ():  # what is cut off: a darker ground
             if part[1] - part[0] > 0.5:
                 p.fillRect(QRectF(part[0], self.TOP, part[1] - part[0], mid_h), QColor(colors["bg"]))
         p.setPen(Qt.NoPen)
-        if self.levels:
-            n, x, cy = len(self.levels), 1.0, wave.center().y()
+        if self.levels and length:
+            x, cy, per_bar = 1.0, wave.center().y(), self.span() / w * 4
             while x < w - 1:
-                level = self.levels[min(n - 1, int(x / w * n))]
-                h = max(2.0, level * (mid_h - 8))
+                sec = self.seconds_at(x)
+                h = max(2.0, self.level(sec, sec + per_bar) * (mid_h - 8))
                 inside = not known or start <= x <= end
                 p.setBrush(QColor(colors["accent" if inside else "disabled"]))
                 p.setOpacity(1.0 if inside else 0.55)
@@ -555,16 +666,26 @@ class Waveform(QWidget):
         font = QFont(self.font())
         font.setBold(True)
         if known:  # the two cuts: a line through the wave and a label above it
+            off = {"left": 0.0, "right": 0.0}  # room taken by the labels of cuts that are not in the part shown
             for which, x, name in (("start", start, "Start"), ("end", end, "End")):
                 at = self.cuts.get(which)
                 text = f"{name} {clock(at)}" if at else f"{name}: nothing cut"
+                side = "left" if x < -0.5 else "right" if x > w + 0.5 else ""
+                text = f"‹ {text}" if side == "left" else f"{text} ›" if side == "right" else text
                 p.setFont(font)
                 tw = p.fontMetrics().horizontalAdvance(text) + 18
-                left = min(max(x - 1 if which == "start" else x + 1 - tw, 0.0), w - tw)
+                if side:  # the cut is to the left or right of the part shown: its label waits at that edge
+                    left = off[side] if side == "left" else w - tw - off[side]
+                    off[side] += tw + 4
+                else:
+                    left = min(max(x - 1 if which == "start" else x + 1 - tw, 0.0), w - tw)
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(colors["accent"]))
+                p.setOpacity(0.6 if side else 1.0)
                 p.drawRoundedRect(QRectF(left, 0, tw, 22), 5, 5)
-                p.drawRect(QRectF(min(max(x - 1, 0.0), w - 2), 20, 2, self.height() - self.BOTTOM - 20))
+                if not side:
+                    p.drawRect(QRectF(min(max(x - 1, 0.0), w - 2), 20, 2, self.height() - self.BOTTOM - 20))
+                p.setOpacity(1.0)
                 p.setPen(QColor("white"))
                 p.drawText(QRectF(left, 0, tw, 22), Qt.AlignCenter, text)
 
@@ -572,15 +693,32 @@ class Waveform(QWidget):
             p.setFont(self.font())
             p.setPen(QColor(colors["sub"]))
             fm, y = p.fontMetrics(), self.height() - self.BOTTOM + 6
-            last = clock(length)
-            last_x = w - fm.horizontalAdvance(last)
-            p.drawText(QRectF(last_x, y, w - last_x, 18), Qt.AlignLeft | Qt.AlignVCenter, last)
+            last_x = w
+            if not self.zoomed():
+                last = clock(length)
+                last_x = w - fm.horizontalAdvance(last)
+                p.drawText(QRectF(last_x, y, w - last_x, 18), Qt.AlignLeft | Qt.AlignVCenter, last)
             for sec in self.steps():
                 text = clock(sec)
                 tw = fm.horizontalAdvance(text)
-                x = min(max(x_of(sec) - (tw / 2 if sec else 0), 0.0), w - tw)
-                if x + tw + 14 < last_x:
+                x = min(max(self.x_of(sec) - (tw / 2 if sec else 0), 0.0), w - tw)
+                if x + tw + (14 if not self.zoomed() else 0) <= last_x:
                     p.drawText(QRectF(x, y, tw + 2, 18), Qt.AlignLeft | Qt.AlignVCenter, text)
+
+
+def parse_clock(text):
+    """The seconds of a place in a recording as a person types it: "9:02", "9:02.4", "1:08:15",
+    "542" or "542.5" (a comma works as the point). None if it is not a time."""
+    parts = text.strip().replace(",", ".").split(":")
+    if not 1 <= len(parts) <= 3 or not all(re.fullmatch(r"\d+", part) for part in parts[:-1]) \
+            or not re.fullmatch(r"\d+(\.\d*)?", parts[-1]):
+        return None
+    if len(parts) > 1 and (float(parts[-1]) >= 60 or (len(parts) == 3 and int(parts[1]) >= 60)):
+        return None
+    sec = 0.0
+    for part in parts:
+        sec = sec * 60 + float(part)
+    return sec
 
 
 def clock_exact(sec):
@@ -613,8 +751,7 @@ class CloseUp(QWidget):
 
     def at(self):
         """Where the cut is (a cut that cuts nothing: the very start or end of the recording)."""
-        at = self.wave.cuts.get(self.which)
-        return at if at else 0.0 if self.which == "start" else self.wave.length
+        return self.wave.cut_at(self.which)
 
     def first(self):
         """The second at the left edge: the cut is in the middle; while it is dragged the picture

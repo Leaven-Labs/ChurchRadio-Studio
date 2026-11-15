@@ -7,11 +7,12 @@ import queue
 import threading
 import time
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-                               QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
+                               QPushButton, QScrollArea, QScrollBar, QStackedWidget, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 import audio
 import builder
@@ -24,10 +25,13 @@ import prelude
 import setup_wizard
 import songs_window
 import ui
+import updates
 
 MEDIA = "Service recordings (*.mkv *.mp4 *.wav *.mp3 *.m4a);;All files (*)"
 CLIP_SECONDS = 12  # how much "Play from start cut" and "Play to end cut" play
 NUDGES = (-5, -1, 1, 5)  # the small buttons that move a cut, in seconds
+ZOOM_STEP = 0.5  # the zoom buttons: half (or twice) as many seconds across the picture
+UPDATE_CHECK_MS = 1500  # the app looks for a new version this long after its window opens
 CREDIT = "Created by Aaron Steger. Published by Leaven Labs."
 PAGES = (("broadcast", "Broadcast"), ("songs", "Songs"), ("history", "History"), ("settings", "Settings"))
 # What the window says it is doing, from the lines the build writes to the log: the words that
@@ -107,13 +111,22 @@ def about(parent):
         except OSError as e:
             QMessageBox.critical(dlg, "About", str(e))
 
+    def look():
+        dlg.accept()
+        parent.check_updates(asked=True)
+
     lic, close = QPushButton("Licenses"), QPushButton("Close")
     lic.setAutoDefault(False)
     lic.clicked.connect(licenses)
+    upd = QPushButton("Check for updates")
+    upd.setAutoDefault(False)
+    upd.clicked.connect(look)
     close.setDefault(True)
     close.clicked.connect(dlg.accept)
     row = QHBoxLayout()
     row.addStretch()
+    if hasattr(parent, "check_updates"):
+        row.addWidget(upd)
     row.addWidget(lic)
     row.addWidget(close)
     row.addStretch()
@@ -241,6 +254,101 @@ class ResultCard(QFrame):
             QMessageBox.critical(self, paths.APP_NAME, str(e))
 
 
+class UpdateBanner(QFrame):
+    """The card at the top of the Broadcast page that says a new version is there, shows the
+    download and says how it went. on_update: Update now was clicked; on_cancel: the download is
+    to be stopped."""
+
+    def __init__(self, on_update, on_cancel):
+        super().__init__()
+        self.setObjectName("card")
+        self.update_info, self.ready = None, False
+        col = QVBoxLayout(self)
+        col.setContentsMargins(20, 12, 20, 12)
+        col.setSpacing(8)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
+        self.head, self.sub = ui.label("", "big"), ui.label("", "sub", wrap=True)
+        texts.addWidget(self.head)
+        texts.addWidget(self.sub)
+        row.addLayout(texts, 1)
+        self.update_btn, self.page_btn = QPushButton("Update now"), QPushButton("Open the download page")
+        self.new_btn, self.later_btn = QPushButton("What's new"), QPushButton("Later")
+        self.cancel_btn = QPushButton("Cancel")
+        self.update_btn.setObjectName("primary")
+        self.update_btn.clicked.connect(on_update)
+        self.page_btn.clicked.connect(self.open_page)
+        self.new_btn.clicked.connect(lambda: self.notes.setVisible(self.notes.isHidden()))
+        self.later_btn.clicked.connect(self.hide)
+        self.cancel_btn.clicked.connect(on_cancel)
+        for b in (self.update_btn, self.page_btn, self.new_btn, self.cancel_btn, self.later_btn):
+            row.addWidget(b, 0, Qt.AlignTop)
+        col.addLayout(row)
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        col.addWidget(self.bar)
+        self.notes = ui.label("", wrap=True)
+        col.addWidget(self.notes)
+        self.hide()
+
+    def lay_out(self, head, sub, buttons=(), bar=False, later="Later"):
+        """Show these texts and buttons. later: what the button that shuts the card says."""
+        self.later_btn.setText(later)
+        self.head.setText(head)
+        self.sub.setText(sub)
+        self.sub.setVisible(bool(sub))
+        for b in (self.update_btn, self.page_btn, self.new_btn, self.cancel_btn, self.later_btn):
+            b.setVisible(b in buttons)
+            b.setEnabled(True)
+        self.bar.setVisible(bar)
+        self.notes.hide()
+        self.show()
+
+    def offer(self, info, can_install):
+        """A newer version is there. info: see updates.release_info."""
+        self.update_info, self.ready = info, False
+        mine = paths.version()
+        lines = updates.whats_new(info["notes"])
+        self.notes.setText("\n".join(lines))
+        able = can_install and bool(info["url"])
+        self.lay_out(f"Version {info['version']} is available",
+                     (f"You have version {mine}. " if updates.is_release() else "This is a development build. ")
+                     + ("Update now downloads it and installs it over this one; your settings, songs and "
+                        "history are kept." if able else "Download it from the releases page."),
+                     ((self.update_btn if able else self.page_btn,) + ((self.new_btn,) if lines else ())
+                      + (self.later_btn,)))
+        self.update_btn.setText("Update now")
+
+    def say(self, head, sub="", page=False):
+        """A plain message (the newest version is here; why it could not be asked or installed)."""
+        self.lay_out(head, sub, ((self.page_btn,) if page else ()) + (self.later_btn,), later="Close")
+
+    def downloading(self, got=0, total=0):
+        if not self.bar.isVisible() or self.head.text() != "Downloading the new version ...":
+            self.lay_out("Downloading the new version ...", "", (self.cancel_btn,), bar=True)
+        self.bar.setRange(0, 1000 if total else 0)
+        self.bar.setValue(int(got / total * 1000) if total else 0)
+        self.sub.setVisible(bool(total))
+        self.sub.setText(f"{got / 1e6:.0f} of {total / 1e6:.0f} MB" if total else "")
+
+    def wait_for_build(self):
+        """Downloaded while a broadcast is being made: it is installed when the person asks again."""
+        self.ready = True
+        self.lay_out("The new version is downloaded", "It can be installed when the broadcast is made.",
+                     (self.update_btn, self.later_btn))
+        self.update_btn.setText("Install now")
+
+    def installing(self, text="Installing the new version ..."):
+        self.lay_out(text, "")
+        self.bar.setRange(0, 0)
+        self.bar.setVisible(True)
+
+    def open_page(self):
+        QDesktopServices.openUrl(QUrl((self.update_info or {}).get("page") or updates.RELEASES_PAGE))
+
+
 class HistoryPage(QWidget):
     """The broadcasts made so far (history.json), the newest first: play one, or open its folder."""
     COLUMNS = (("Service date", 170), ("Season", 120), ("Broadcast", 280), ("Songs", 300))
@@ -344,6 +452,7 @@ class MainWindow(QWidget):
         self.job = None  # the recording on the page: {"path"}, and "made" once its broadcast is made
         self.stopper = None  # stops the work that is going on (Cancel)
         self.reviewing = False  # the cuts were found and wait for the person's OK (see self.review)
+        self.updating = None  # the update that is being downloaded or installed: {"stop", "path"}
         self.player, self.playing, self.play_starting, self.mp3_started = player.Player(), None, False, None
         atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
         self.setObjectName("root")
@@ -458,6 +567,8 @@ class MainWindow(QWidget):
         top.addWidget(self.choose_btn)
         lay.addLayout(top)
 
+        self.update_banner = UpdateBanner(self.start_update, self.cancel_update)  # shown when there is a new version
+        lay.addWidget(self.update_banner)
         self.drop = DropArea(self.browse, self.play)
         lay.addWidget(self.drop)
 
@@ -488,12 +599,42 @@ class MainWindow(QWidget):
         head = QHBoxLayout()
         head.addWidget(ui.label("WHERE THE SERVICE IS CUT", "caps"))
         head.addStretch()
-        self.wave_hint = ui.label("Drag a marker to move a cut, or click in a close-up to place it exactly", "small")
+        self.wave_hint = ui.label("Drag a marker or type its time to move a cut. Zoom in to place it exactly.",
+                                  "small")
         head.addWidget(self.wave_hint)
         col.addLayout(head)
         self.wave = ui.Waveform()
         self.wave.moved.connect(self.cut_moved)
+        self.wave.changed.connect(self.show_cut_times)
+        self.wave.viewed.connect(self.show_zoom)
         col.addWidget(self.wave)
+        row = QHBoxLayout()  # zoom: closer, further, to a cut, the whole recording; and where the picture is
+        row.setSpacing(6)
+        self.zoom_label = ui.label("Zoom", "small")
+        row.addWidget(self.zoom_label)
+        self.zoom_btns = {}
+        for key, text, tip, slot in (
+                ("out", "−", "Zoom out: show more of the recording.", lambda: self.wave.zoom(1 / ZOOM_STEP)),
+                ("in", "+", "Zoom in: show the recording closer. (Or hold Ctrl and turn the mouse wheel.)",
+                 lambda: self.wave.zoom(ZOOM_STEP)),
+                ("start", "Start cut", "Show the start cut from near.", lambda: self.wave.zoom_to("start")),
+                ("end", "End cut", "Show the end cut from near.", lambda: self.wave.zoom_to("end")),
+                ("all", "Whole recording", "Zoom all the way out.", self.wave.show_all)):
+            b = self.zoom_btns[key] = QPushButton(text)
+            b.setObjectName("mini")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _on=False, f=slot: f())
+            row.addWidget(b)
+        self.wave_scroll = QScrollBar(Qt.Horizontal)  # zoomed in: moves along the recording
+        self.wave_scroll.setObjectName("track")
+        self.wave_scroll.setToolTip("Move along the recording. (Or drag the picture.)")
+        keep = self.wave_scroll.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)
+        self.wave_scroll.setSizePolicy(keep)
+        self.wave_scroll.valueChanged.connect(lambda v: self.wave.show_part(v / 10, self.wave.span()))
+        row.addSpacing(8)
+        row.addWidget(self.wave_scroll, 1)
+        col.addLayout(row)
         row = QHBoxLayout()  # each cut from near: a few seconds around it, to place it between two words
         row.setSpacing(20)
         self.closeups = [ui.CloseUp(self.wave, which) for which in ("start", "end")]
@@ -502,11 +643,21 @@ class MainWindow(QWidget):
         col.addLayout(row)
         row = QHBoxLayout()  # under them: small steps for each cut, and the button that uses them
         row.setSpacing(6)
-        self.nudges = []
+        self.nudges, self.cut_times, self.cut_labels = [], {}, []
         self.make_btn = QPushButton("Make the broadcast")
         self.make_btn.setObjectName("primary")
         self.make_btn.clicked.connect(self.make)
         for which in ("start", "end"):
+            lab = ui.label("Start" if which == "start" else "End", "small")
+            box = self.cut_times[which] = QLineEdit()  # the cut's time, to read and to type
+            box.setFixedWidth(86)
+            box.setPlaceholderText("nothing cut")
+            box.setToolTip(f"Where the service {'starts' if which == 'start' else 'ends'} in the recording. Type "
+                           "a time (9:02, 9:02.4 or 1:08:15) and press Enter. Empty = nothing is cut here.")
+            box.editingFinished.connect(lambda w=which: self.cut_typed(w))
+            self.cut_labels.append(lab)
+            row.addWidget(lab)
+            row.addWidget(box)
             for sec in NUDGES:
                 b = QPushButton(f"{'−' if sec < 0 else '+'}{abs(sec)} s")
                 b.setObjectName("mini")
@@ -718,6 +869,8 @@ class MainWindow(QWidget):
     def closeEvent(self, event):  # noqa: N802  (Qt's name)
         if self.busy and self.stopper:
             self.stopper.stop()  # no ffmpeg is left running behind a closed window
+        if self.updating:
+            self.updating["stop"] = True
         self.player.close()
         self.songs_page.shutdown()
         if self.settings_form is not None:
@@ -778,6 +931,13 @@ class MainWindow(QWidget):
             b.setEnabled(not self.busy)
         for c in self.closeups:
             c.setVisible(known)
+        for w in list(self.cut_times.values()) + self.cut_labels:
+            w.setVisible(known)
+        for box in self.cut_times.values():
+            box.setEnabled(not self.busy)
+        for w in [self.zoom_label] + list(self.zoom_btns.values()):
+            w.setVisible(known)
+        self.show_zoom()
         self.wave_hint.setVisible(known and not self.busy)
         for b in (self.drop.play_start, self.drop.play_end):
             b.setEnabled(known)
@@ -800,6 +960,9 @@ class MainWindow(QWidget):
     def may_start(self):
         """True if a broadcast can be made now (then the lock is taken); else the person is told why."""
         if self.busy:
+            return False
+        if self.updating and self.updating.get("installing"):
+            QMessageBox.warning(self, paths.APP_NAME, "The new version is being installed. The app closes soon.")
             return False
         if self.songs_page.working():
             QMessageBox.warning(self, paths.APP_NAME, "The song list is being updated. Try again when it is done.")
@@ -883,6 +1046,111 @@ class MainWindow(QWidget):
             levels = detail = None
         self.q.put(("wave", (path, levels, detail)))
 
+    # ---- a new version of the app -------------------------------------------------------
+    def check_updates(self, asked=False):
+        """Ask GitHub, in the background, if there is a newer version. asked: the person clicked
+        Check for updates (then the answer is shown also when there is none, or it failed)."""
+        if self.updating:
+            return
+        if asked:
+            self.show_page("broadcast")
+            self.update_banner.say("Looking for a new version ...")
+
+        def run():
+            try:
+                self.q.put(("update", (asked, updates.check(), None)))
+            except Exception as e:  # noqa: BLE001  (told only if the person asked)
+                self.q.put(("update", (asked, None, str(e))))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def update_found(self, asked, info, error):
+        banner = self.update_banner
+        if self.updating:
+            return
+        if info:
+            banner.offer(info, updates.can_install())
+        elif not asked:
+            return  # at the start of the app: quiet when there is nothing new, or no internet
+        elif error:
+            banner.say("Could not look for a new version", error, page=True)
+        else:
+            banner.say(f"Version {paths.version()} is the newest version")
+        QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(banner))
+
+    def start_update(self):
+        """Update now: download the new version (checked against its checksum), then install it."""
+        banner = self.update_banner
+        if banner.ready and self.updating:  # downloaded while a broadcast was made: install it now
+            self.install_update(self.updating["path"])
+            return
+        info = banner.update_info
+        if self.updating or not info:
+            return
+        self.updating = state = {"stop": False, "path": ""}
+        banner.downloading()
+
+        def run():
+            try:
+                path = updates.download(info, lambda got, total: self.q.put(("update-progress", (got, total))),
+                                        lambda: state["stop"])
+                self.q.put(("update-ready", path))
+            except updates.Cancelled:
+                self.q.put(("update-failed", ""))
+            except Exception as e:  # noqa: BLE001  told to the person
+                self.q.put(("update-failed", str(e)))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def cancel_update(self):
+        if self.updating:
+            self.updating["stop"] = True
+            self.update_banner.cancel_btn.setEnabled(False)
+
+    def install_update(self, path):
+        """Start the downloaded update and close the app. Not while a broadcast is being made, here
+        or by a scheduled run: the update replaces the program's files."""
+        self.updating["path"] = path
+        if self.busy or self.songs_page.working() or cli.lock_owner():
+            self.update_banner.wait_for_build()
+            return
+        self.updating["installing"] = True
+        self.update_banner.installing()
+
+        def run():
+            try:
+                self.q.put(("update-installed", updates.install(path)))
+            except Exception as e:  # noqa: BLE001  told to the person
+                self.q.put(("update-failed", str(e)))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def update_told(self, kind, msg):
+        """What the update's background work told (see poll)."""
+        banner = self.update_banner
+        if kind == "update":
+            self.update_found(*msg)
+        elif kind == "update-progress":
+            if self.updating and not self.updating["path"]:
+                banner.downloading(*msg)
+        elif kind == "update-ready":
+            self.install_update(msg)
+        elif kind == "update-failed":
+            info, self.updating = banner.update_info, None
+            banner.ready = False
+            if msg:
+                banner.say("The update could not be installed", msg, page=True)
+            elif info:  # the download was cancelled: the offer is back
+                banner.offer(info, updates.can_install())
+        elif kind == "update-installed":
+            banner.installing(msg)
+            banner.bar.hide()
+            QTimer.singleShot(2500, self.quit_for_update)
+
+    def quit_for_update(self):
+        self.close()
+        ui.QApplication.instance().quit()
+
     # ---- the cuts: moved and played by the person --------------------------------------
     def cut_moved(self, which):
         """A cut was dragged or nudged: show its new time and offer to make the broadcast with it."""
@@ -892,6 +1160,44 @@ class MainWindow(QWidget):
         self.show_cut_controls(make=True)
         if not self.reviewing:
             self.status.setText("The cuts were moved.")
+
+    def show_cut_times(self):
+        """The boxes under the picture show where the cuts are (not while a time is being typed)."""
+        for which, box in self.cut_times.items():
+            if not (box.hasFocus() and box.isModified()):
+                at = self.wave.cuts.get(which)
+                text = ui.clock_exact(at) if at else ""
+                if box.text() != text:
+                    box.setText(text)
+
+    def cut_typed(self, which):
+        """A time was typed for a cut (Enter, or the box was left): put the cut there. Something
+        that is not a time is taken back."""
+        box = self.cut_times[which]
+        if not box.isModified():
+            return
+        box.setModified(False)
+        text = box.text().strip()
+        at = ui.parse_clock(text) if text else (0.0 if which == "start" else self.wave.length)
+        if at is None:
+            self.status.setText(f'"{text}" is not a time. Type it like 9:02 or 1:08:15.')
+        else:
+            self.wave.place(which, at)  # (kept apart from the other cut and inside the recording)
+        self.show_cut_times()
+
+    def show_zoom(self):
+        """The zoom buttons and the bar under the picture follow the part of the recording shown."""
+        wave, bar = self.wave, self.wave_scroll
+        self.zoom_btns["out"].setEnabled(wave.zoomed())
+        self.zoom_btns["all"].setEnabled(wave.zoomed())
+        self.zoom_btns["in"].setEnabled(wave.span() > wave.MIN_SPAN)
+        bar.blockSignals(True)
+        bar.setRange(0, int(round(max(0.0, wave.length - wave.span()) * 10)))
+        bar.setPageStep(max(1, int(wave.span() * 10)))
+        bar.setSingleStep(max(1, int(wave.span())))
+        bar.setValue(int(round(wave.first() * 10)))
+        bar.blockSignals(False)
+        bar.setVisible(wave.zoomed() and wave.known())
 
     def play(self, which):
         """Play the seconds after the start cut, or before the end cut. A second click stops it."""
@@ -967,6 +1273,9 @@ class MainWindow(QWidget):
             if kind == "tell":
                 if self.busy:
                     self.told(*msg)
+                continue
+            if kind.startswith("update"):  # a new version: found, downloading, installed
+                self.update_told(kind, msg)
                 continue
             if kind == "wave":  # may come after the build is done; not for an older recording
                 if msg[0] == self.drop.path:
@@ -1049,9 +1358,14 @@ def run(argv):
     app.installEventFilter(FileOpener(window))
     window.show()
     try:
-        first_run = not builder.load_config().get("setup_done")
+        cfg = builder.load_config()
     except (OSError, ValueError):
-        first_run = True
+        cfg = {}
+    first_run = not cfg.get("setup_done")
+    # A new version? Asked once, quietly, at each start (Settings turns it off). Not from source:
+    # a development build has no version to compare.
+    if cfg.get("check_updates", True) and updates.is_release():
+        QTimer.singleShot(UPDATE_CHECK_MS, window.check_updates)
     # -psn_...: the process number older macOS passes to an app opened from the Finder.
     args = [a for a in argv[1:] if not a.startswith("-psn_")]
     if first_run:
@@ -1095,6 +1409,18 @@ def uitest():
         window.wave.nudge("start", -5)
         if window.wave.cuts["start"] != 537.0 or window.steps["start"].value.text() != "8:57":
             raise RuntimeError("the start cut did not move")
+        window.cut_times["end"].setText("1:08:10")  # a time typed for the end cut
+        window.cut_times["end"].setModified(True)
+        window.cut_typed("end")
+        if window.wave.cuts["end"] != 4090.0 or window.cut_times["start"].text() != "8:57.0":
+            raise RuntimeError("the end cut was not put where it was typed")
+        window.wave.zoom_to("start")  # zoomed in on the start cut, and out again
+        drawn(window, "zoomed")
+        if not window.wave.zoomed() or window.wave_scroll.isHidden():
+            raise RuntimeError("the picture of the recording did not zoom in")
+        window.wave.show_all()
+        window.update_banner.offer(updates.release_info({"tag_name": "v9.9.9", "body": "## What's new\n- **More.**"}),
+                                   theme == "dark")
         window.result.show_result("Church Radio 2026-11-15.mp3", 3600.0, "Too long." if theme == "dark" else None)
         window.set_busy(True)  # (the Cancel button)
         drawn(window, "making")

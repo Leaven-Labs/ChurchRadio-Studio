@@ -69,6 +69,9 @@ item. Remove it from this file once it is built.
     `stop_playing` / `play_count` make sure only the newest piece asked for plays.
   - Known limits: no sound while the marker is dragged (it plays from where it is let go), and a
     short gap about once a minute where the next piece starts. Not yet heard on real hardware.
+- **1.5.1: the new icon and the www.leavenlabs.org address, nothing else.** `.github/RELEASE_NOTES.md`
+  and the workflow's default tag are set for it. To release: merge, then run the Release workflow (or
+  push `v1.5.1`). No Python code is changed. Not yet seen on a real Windows PC or Mac: the icon.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.

@@ -8,7 +8,7 @@ import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtGui import QDesktopServices, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
                                QPushButton, QScrollArea, QScrollBar, QStackedWidget, QTableWidget,
@@ -29,6 +29,8 @@ import updates
 
 MEDIA = "Service recordings (*.mkv *.mp4 *.wav *.mp3 *.m4a);;All files (*)"
 CLIP_SECONDS = 12  # how much "Play from start cut" and "Play to end cut" play
+LINE_SECONDS = 60  # Play under the picture: the recording is played in pieces of this length, one after the other
+# (a longer piece takes longer to cut before the sound starts: about a second for five minutes)
 NUDGES = (-5, -1, 1, 5)  # the small buttons that move a cut, in seconds
 ZOOM_STEP = 0.5  # the zoom buttons: half (or twice) as many seconds across the picture
 UPDATE_CHECK_MS = 1500  # the app looks for a new version this long after its window opens
@@ -454,7 +456,13 @@ class MainWindow(QWidget):
         self.reviewing = False  # the cuts were found and wait for the person's OK (see self.review)
         self.updating = None  # the update that is being downloaded or installed: {"stop", "path"}
         self.player, self.playing, self.play_starting, self.mp3_started = player.Player(), None, False, None
+        # Playing: one piece at a time. play_count tells the newest piece from the ones before it;
+        # line: the piece Play under the picture is playing: {"from", "seconds", "started"}.
+        self.play_count, self.play_lock, self.line = 0, threading.Lock(), None
         atexit.register(lambda: self.busy and cli.drop_lock())  # window closed mid-build
+        self.space = QShortcut(QKeySequence(Qt.Key_Space), self)  # play / pause, on the Broadcast page
+        self.space.activated.connect(self.play_line)
+        self.space.setEnabled(False)
         self.setObjectName("root")
         self.setAcceptDrops(True)
         self.resize(1180, 860)
@@ -599,17 +607,32 @@ class MainWindow(QWidget):
         head = QHBoxLayout()
         head.addWidget(ui.label("WHERE THE SERVICE IS CUT", "caps"))
         head.addStretch()
-        self.wave_hint = ui.label("Drag a marker or type its time to move a cut. Zoom in to place it exactly.",
-                                  "small")
+        self.wave_hint = ui.label("Drag a marker or type its time to move a cut. Click in the picture to listen "
+                                  "from there.", "small")
         head.addWidget(self.wave_hint)
         col.addLayout(head)
         self.wave = ui.Waveform()
         self.wave.moved.connect(self.cut_moved)
         self.wave.changed.connect(self.show_cut_times)
         self.wave.viewed.connect(self.show_zoom)
+        self.wave.sought.connect(self.line_sought)
         col.addWidget(self.wave)
-        row = QHBoxLayout()  # zoom: closer, further, to a cut, the whole recording; and where the picture is
+        # Under the picture: play from the play marker; zoom closer, further, to a cut, the whole
+        # recording; and the bar that moves along the recording.
+        row = QHBoxLayout()
         row.setSpacing(6)
+        self.line_btn = QPushButton("Play")
+        self.line_btn.setObjectName("mini")
+        self.line_btn.setMinimumWidth(64)
+        self.line_btn.setFocusPolicy(Qt.NoFocus)
+        self.line_btn.setToolTip("Play the recording from the play marker, and pause it (or press the space "
+                                 "bar). Click in the picture to put the marker where you want to listen.")
+        self.line_btn.clicked.connect(self.play_line)
+        self.line_time = ui.label("", "small")  # where the play marker is
+        self.line_time.setMinimumWidth(62)
+        row.addWidget(self.line_btn)
+        row.addWidget(self.line_time)
+        row.addSpacing(8)
         self.zoom_label = ui.label("Zoom", "small")
         row.addWidget(self.zoom_label)
         self.zoom_btns = {}
@@ -627,7 +650,7 @@ class MainWindow(QWidget):
             row.addWidget(b)
         self.wave_scroll = QScrollBar(Qt.Horizontal)  # zoomed in: moves along the recording
         self.wave_scroll.setObjectName("track")
-        self.wave_scroll.setToolTip("Move along the recording. (Or drag the picture.)")
+        self.wave_scroll.setToolTip("Move along the recording. (Or hold Shift and turn the mouse wheel.)")
         keep = self.wave_scroll.sizePolicy()
         keep.setRetainSizeWhenHidden(True)
         self.wave_scroll.setSizePolicy(keep)
@@ -635,13 +658,7 @@ class MainWindow(QWidget):
         row.addSpacing(8)
         row.addWidget(self.wave_scroll, 1)
         col.addLayout(row)
-        row = QHBoxLayout()  # each cut from near: a few seconds around it, to place it between two words
-        row.setSpacing(20)
-        self.closeups = [ui.CloseUp(self.wave, which) for which in ("start", "end")]
-        for c in self.closeups:
-            row.addWidget(c)
-        col.addLayout(row)
-        row = QHBoxLayout()  # under them: small steps for each cut, and the button that uses them
+        row = QHBoxLayout()  # each cut's time and small steps for it, and the button that uses the cuts
         row.setSpacing(6)
         self.nudges, self.cut_times, self.cut_labels = [], {}, []
         self.make_btn = QPushButton("Make the broadcast")
@@ -777,6 +794,7 @@ class MainWindow(QWidget):
                 self.settings_form.show_models()
         self.nav[key].setChecked(True)
         self.pages.setCurrentIndex([k for k, _text in PAGES].index(key))
+        self.show_space()
 
     def show_season(self):
         self.season_label.setText(f"{season_name(self.date.get())} season")
@@ -929,15 +947,14 @@ class MainWindow(QWidget):
         for b in self.nudges:
             b.setVisible(known)
             b.setEnabled(not self.busy)
-        for c in self.closeups:
-            c.setVisible(known)
-        for w in list(self.cut_times.values()) + self.cut_labels:
+        for w in list(self.cut_times.values()) + self.cut_labels + [self.line_btn, self.line_time]:
             w.setVisible(known)
         for box in self.cut_times.values():
             box.setEnabled(not self.busy)
         for w in [self.zoom_label] + list(self.zoom_btns.values()):
             w.setVisible(known)
         self.show_zoom()
+        self.show_space()
         self.wave_hint.setVisible(known and not self.busy)
         for b in (self.drop.play_start, self.drop.play_end):
             b.setEnabled(known)
@@ -982,7 +999,7 @@ class MainWindow(QWidget):
             self.date.set_date(date)  # show the date read from the file name
             self.show_season()
         self.job = {"path": path}
-        self.player.stop()
+        self.stop_playing()
         self.drop.set_file(path)
         self.start_hint.hide()  # (it is the tooltip of Start too) room for the picture of the recording
         self.wave.reset()
@@ -1156,7 +1173,8 @@ class MainWindow(QWidget):
         """A cut was dragged or nudged: show its new time and offer to make the broadcast with it."""
         at = self.wave.cuts.get(which)
         self.steps[which].set("done", clock(at) if at else "nothing cut")
-        self.player.stop()
+        if self.playing in ("start", "end"):  # (that piece is not where the cut is any more)
+            self.stop_playing()
         self.show_cut_controls(make=True)
         if not self.reviewing:
             self.status.setText("The cuts were moved.")
@@ -1199,37 +1217,114 @@ class MainWindow(QWidget):
         bar.blockSignals(False)
         bar.setVisible(wave.zoomed() and wave.known())
 
+    def show_space(self):
+        """The space bar plays and pauses only on the Broadcast page, once there is something to play."""
+        self.space.setEnabled(self.pages.currentIndex() == 0 and self.wave.known() and bool(self.job))
+
+    def start_playing(self, which, at, seconds):
+        """Play `seconds` of the recording from `at`, in the background (ffmpeg cuts the piece first).
+        which: "start" or "end" (the play buttons of the cuts) or "line" (Play under the picture).
+        Only the newest piece asked for is played."""
+        self.play_count += 1
+        count, path = self.play_count, self.job["path"]
+        self.playing, self.play_starting = which, True
+        self.line = {"from": at, "seconds": seconds, "started": None} if which == "line" else None
+
+        def run():
+            with self.play_lock:  # (one after the other: each stops the piece before it)
+                if count != self.play_count:
+                    return  # another piece was asked for meanwhile
+                try:
+                    self.player.play(path, at, seconds)
+                    self.q.put(("played", (count, None)))
+                except Exception as e:  # noqa: BLE001  told to the person
+                    self.q.put(("played", (count, str(e))))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def stop_playing(self):
+        """Stop what is playing. The play marker stays where it is."""
+        self.play_count += 1  # (a piece that is still being cut is not played)
+        self.player.stop()
+        self.playing, self.play_starting, self.line = None, False, None
+
+    def is_playing(self, which):
+        return self.playing == which and (self.play_starting or self.player.playing())
+
     def play(self, which):
         """Play the seconds after the start cut, or before the end cut. A second click stops it."""
         if not self.job or not self.wave.known():
             return
-        if self.playing == which and (self.play_starting or self.player.playing()):
-            self.player.stop()
-            self.playing = None
+        if self.is_playing(which):
+            self.stop_playing()
             return
         if which == "start":
             at = self.wave.cuts.get("start") or 0.0
         else:
             at = max(0.0, (self.wave.cuts.get("end") or self.wave.length) - CLIP_SECONDS)
-        self.playing, self.play_starting = which, True
+        self.start_playing(which, at, CLIP_SECONDS)
 
-        def run(path=self.job["path"]):
-            try:
-                self.player.play(path, at, CLIP_SECONDS)
-                self.q.put(("played", None))
-            except Exception as e:  # noqa: BLE001  told to the person
-                self.q.put(("played", str(e)))
+    def play_line(self):
+        """Play under the picture, or the space bar: play the recording from the play marker, or
+        pause it there. With no marker yet (or at the very end) it plays from the start cut."""
+        if not self.job or not self.wave.known():
+            return
+        if self.is_playing("line"):
+            self.stop_playing()  # pause: the marker stays where the sound was
+            return
+        at = self.wave.playhead
+        if at is None or at >= self.wave.length - 0.5:
+            at = self.wave.cut_at("start")
+        self.play_line_from(at)
 
-        threading.Thread(target=run, daemon=True).start()
+    def play_line_from(self, at):
+        self.wave.set_playhead(at)
+        self.start_playing("line", at, min(LINE_SECONDS, max(0.0, self.wave.length - at)))
+
+    def line_sought(self, at):
+        """The play marker was put somewhere in the picture: what is playing goes on from there."""
+        if self.playing == "line":
+            self.play_line_from(at)
+        self.show_playing()
+
+    def follow_line(self):
+        """While the recording plays from the play marker: the marker moves along, the picture
+        follows it when zoomed in, and the next piece starts when one is over."""
+        line = self.line
+        if self.playing != "line" or not line or line["started"] is None:
+            return
+        at, end = line["from"] + time.time() - line["started"], line["from"] + line["seconds"]
+        if self.player.playing() and at < end:
+            wave = self.wave
+            if not wave.seeking:
+                wave.set_playhead(at)
+                # Zoomed in, the picture turns the page when the marker runs out of it. Not when
+                # the person has moved the picture somewhere else to look there.
+                seen = wave.first() <= at <= wave.first() + wave.span()
+                if wave.zoomed() and not wave.drag and not seen and line.get("seen") == wave.view:
+                    wave.show_part(at - wave.span() * 0.05, wave.span())
+                    seen = True
+                line["seen"] = wave.view if seen else None  # (the part shown when the marker was last in it)
+        elif at >= end - 0.5 and end < self.wave.length - 0.5:
+            self.play_line_from(end)  # the piece is over: the next one
+        else:  # the end of the recording, or the sound stopped by itself
+            self.wave.set_playhead(min(at, end))
+            self.stop_playing()
 
     def show_playing(self):
-        """The play button of the piece that is playing says Stop."""
+        """The play button of the piece that is playing says Stop (under the picture: Pause), and
+        the time next to Play is where the play marker is."""
+        self.follow_line()
         on = self.playing if self.play_starting or self.player.playing() else None
         for which, b, text in (("start", self.drop.play_start, "Play from start cut"),
-                               ("end", self.drop.play_end, "Play to end cut")):
-            want = "Stop" if on == which else text
+                               ("end", self.drop.play_end, "Play to end cut"), ("line", self.line_btn, "Play")):
+            want = ("Pause" if which == "line" else "Stop") if on == which else text
             if b.text() != want:
                 b.setText(want)
+        at = self.wave.playhead
+        want = ui.clock_exact(at) if at is not None else ""
+        if self.line_time.text() != want:
+            self.line_time.setText(want)
 
     def set_warning(self, msg):
         self.warning = msg
@@ -1281,11 +1376,18 @@ class MainWindow(QWidget):
                 if msg[0] == self.drop.path:
                     self.wave.set_levels(msg[1], msg[2], audio.DETAIL_PER_SECOND)
                 continue
-            if kind == "played":  # the piece has started to play, or could not be played
+            if kind == "played":  # a piece has started to play, or could not be played
+                count, error = msg
+                if count != self.play_count:  # not the newest piece any more
+                    if not self.play_starting:
+                        self.player.stop()  # it was stopped while it was being cut
+                    continue
                 self.play_starting = False
-                if msg:
-                    self.playing = None
-                    QMessageBox.warning(self, paths.APP_NAME, f"Could not play the recording:\n{msg}")
+                if error:
+                    self.stop_playing()
+                    QMessageBox.warning(self, paths.APP_NAME, f"Could not play the recording:\n{error}")
+                elif self.line:
+                    self.line["started"] = time.time()
                 continue
             if kind == "review":  # the cuts are found: the person checks them and clicks Make the broadcast
                 cli.drop_lock()
@@ -1419,6 +1521,10 @@ def uitest():
         if not window.wave.zoomed() or window.wave_scroll.isHidden():
             raise RuntimeError("the picture of the recording did not zoom in")
         window.wave.show_all()
+        window.wave.set_playhead(600.0)  # the play marker, and Play under the picture
+        window.show_playing()
+        if window.line_btn.isHidden() or window.line_time.text() != "10:00.0":
+            raise RuntimeError("the play marker is not shown")
         window.update_banner.offer(updates.release_info({"tag_name": "v9.9.9", "body": "## What's new\n- **More.**"}),
                                    theme == "dark")
         window.result.show_result("Church Radio 2026-11-15.mp3", 3600.0, "Too long." if theme == "dark" else None)

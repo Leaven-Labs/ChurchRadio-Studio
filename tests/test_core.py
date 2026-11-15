@@ -233,7 +233,7 @@ class SongSilence(unittest.TestCase):
             self.assertLess(max(levels[:15] + levels[-15:]), 0.1)
             self.assertGreater(min(levels[25:55]), 0.8)
             self.assertRaises(RuntimeError, audio.loudness_outline, os.path.join(d, "missing.mp3"))
-            outline, detail = audio.loudness_picture(f, buckets=80, per_second=20)  # the close-ups of the cuts
+            outline, detail = audio.loudness_picture(f, buckets=80, per_second=20)  # the picture, zoomed in
             self.assertEqual(outline, levels)
             self.assertAlmostEqual(len(detail), 8 * 20, delta=4)
             self.assertLess(max(detail[:30]), 0.1)
@@ -1361,48 +1361,6 @@ class Windows(unittest.TestCase):
             self.assertEqual((w.make_btn.isHidden(), w.make_btn.text()), (False, "Make the broadcast"))
             self.assertTrue(w.choose_btn.isEnabled() and w.wave.editable)
 
-    def test_close_ups_of_the_cuts(self):
-        """Under the picture of the recording each cut is shown from near: a click or a drag there
-        places the cut to a tenth of a second."""
-        w = ui.Waveform()
-        ups = [ui.CloseUp(w, which) for which in ("start", "end")]
-        moved = []
-        w.moved.connect(moved.append)
-        for c in ups:
-            c.resize(400, 100)
-            c.grab()  # nothing known yet: still drawn
-        w.set_levels([0.5] * 600, [0.5] * (4440 * 20), 20)
-        w.set_length(4440.0)
-        w.set_cut("start", 542.0)
-        w.set_cut("end", None)
-        start, end = ups
-        self.assertEqual((start.first(), start.seconds_at(200), start.x_of(542.0)), (522.0, 542.0, 200.0))
-        self.assertEqual((end.at(), end.first()), (4440.0, 4420.0))  # nothing cut: the end of the recording
-        self.assertEqual((ui.clock_exact(542.44), ui.clock_exact(3725.96)), ("9:02.4", "1:02:06.0"))
-        from PySide6.QtCore import QEvent, QPointF
-        from PySide6.QtGui import QMouseEvent
-        kinds = {"mousePressEvent": QEvent.MouseButtonPress, "mouseMoveEvent": QEvent.MouseMove,
-                 "mouseReleaseEvent": QEvent.MouseButtonRelease}
-
-        def press(c, x, kind):
-            getattr(c, kind)(QMouseEvent(kinds[kind], QPointF(x, 50), QPointF(x, 50), Qt.LeftButton, Qt.LeftButton,
-                                         Qt.NoModifier))
-
-        press(start, 100, "mousePressEvent")  # not while a broadcast is made
-        self.assertEqual((w.cuts["start"], moved), (542.0, []))
-        w.set_editable(True)
-        press(start, 100, "mousePressEvent")  # 100 of 400 pixels: 10 s before the middle
-        self.assertEqual((w.cuts["start"], start.first()), (532.0, 522.0))  # the picture stays while dragged
-        press(start, 123, "mouseMoveEvent")
-        self.assertEqual(w.cuts["start"], 534.3)
-        press(start, 123, "mouseReleaseEvent")
-        self.assertEqual((moved, start.first()), (["start"], 514.3))  # then the cut is in the middle again
-        press(end, 150, "mousePressEvent")
-        press(end, 150, "mouseReleaseEvent")
-        self.assertEqual((w.cuts["end"], moved), (4435.0, ["start", "end"]))
-        for c in ups:
-            c.grab()
-
     def test_cuts_are_checked_moved_and_played(self):
         """"Check the cuts" on: the app finds the cuts and waits. The person moves and plays them,
         then the broadcast is made with those cuts. Moving a cut afterwards offers to make it again."""
@@ -1436,7 +1394,7 @@ class Windows(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(self.dir.name, "build.lock")))
             self.assertEqual(w.status.text(), "Check the cuts, then click Make the broadcast.")
             self.assertTrue(w.wave.editable and w.drop.play_start.isEnabled())
-            self.assertFalse(any(c.isHidden() for c in w.closeups))
+            self.assertFalse(w.line_btn.isHidden())
 
             w.nudges[0].click()  # start cut 5 s earlier
             w.nudges[-1].click()  # end cut 5 s later
@@ -1538,10 +1496,107 @@ class Windows(unittest.TestCase):
                                           "mouseReleaseEvent": QEvent.MouseButtonRelease}[kind], QPointF(x, 60),
                                          QPointF(x, 60), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
 
-        mouse("mousePressEvent", 400)  # beside the cuts: the picture is dragged along
-        mouse("mouseMoveEvent", 380)
-        mouse("mouseReleaseEvent", 380)
-        self.assertEqual((round(w.first(), 1), w.cuts), (754.8, {"start": 542.0, "end": 4095.0}))
+        sought = []
+        w.sought.connect(sought.append)
+        mouse("mousePressEvent", 400)  # beside the cuts: the play marker is put there, and dragged along
+        self.assertEqual((round(w.playhead, 1), w.seeking, sought), (2442.0, True, []))
+        mouse("mouseMoveEvent", 300)
+        mouse("mouseReleaseEvent", 300)
+        self.assertEqual((round(w.playhead, 1), w.seeking, [round(t, 1) for t in sought]), (1998.0, False, [1998.0]))
+        self.assertEqual((round(w.first(), 1), w.cuts), (666.0, {"start": 542.0, "end": 4095.0}))  # nothing else moved
+        w.grab()
+        w.set_playhead(99999.0)  # kept inside the recording
+        self.assertEqual(w.playhead, 4440.0)
+        w.reset()
+        self.assertIsNone(w.playhead)
+
+    def test_recording_is_played_from_the_marker(self):
+        """Play under the picture (or the space bar) plays from the play marker and pauses there;
+        a click in the picture moves the marker, and what is playing goes on from it."""
+        played = []
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.player.Player, "play", side_effect=lambda *a: played.append(a)), \
+                mock.patch.object(mainwindow.player.Player, "stop"):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.play_line()  # no recording yet: nothing happens
+            self.assertEqual((w.space.isEnabled(), w.playing, w.line_btn.isHidden()), (False, None, True))
+            w.wave.set_length(4440.0)
+            w.wave.set_cut("start", 542.0)
+            w.wave.set_cut("end", 4095.0)
+            w.job = {"path": "service.mkv"}
+            w.show_cut_controls(make=False)
+            self.assertEqual((w.space.isEnabled(), w.line_btn.isHidden(), w.line_btn.text()), (True, False, "Play"))
+            w.show_page("history")  # the space bar is for the Broadcast page only
+            self.assertFalse(w.space.isEnabled())
+            w.show_page("broadcast")
+            self.assertTrue(w.space.isEnabled())
+
+            w.player.until = time.time() + 9999  # (as the real player while a piece is playing)
+            w.line_btn.click()  # no marker yet: from the start cut
+            _pump(lambda: w.line and w.line["started"])
+            self.assertEqual((played, round(w.wave.playhead), w.playing), ([("service.mkv", 542.0, 60)], 542, "line"))
+            w.line["started"] -= 20.0  # twenty seconds later
+            _pump(lambda: w.wave.playhead >= 562 and w.line_btn.text() == "Pause")
+            self.assertEqual((round(w.wave.playhead), w.line_btn.text(), w.line_time.text()[:4]), (562, "Pause", "9:22"))
+            w.wave.show_part(540.0, 30.0)  # zoomed in: the picture turns the page when the marker runs out of it
+            _pump(lambda: w.line.get("seen"))
+            w.line["started"] -= 10.0
+            _pump(lambda: w.wave.first() > 560)
+            self.assertTrue(w.wave.first() <= w.wave.playhead <= w.wave.first() + 30.0)
+            w.wave.show_part(2000.0, 30.0)  # the person looks somewhere else: the picture stays there
+            _pump(lambda: w.line.get("seen") is None)
+            _pump(lambda: False, seconds=0.3)
+            self.assertEqual(w.wave.first(), 2000.0)
+            w.space.activated.emit()  # the space bar: pause, the marker stays
+            at = w.wave.playhead
+            self.assertEqual((w.playing, w.line), (None, None))
+            _pump(lambda: w.line_btn.text() == "Play")
+            self.assertEqual((w.wave.playhead, w.line_btn.text()), (at, "Play"))
+            w.space.activated.emit()  # and on from there
+            _pump(lambda: len(played) == 2)
+            self.assertEqual(played[1], ("service.mkv", at, 60))
+
+            w.wave.sought.emit(4400.0)  # a click in the picture while it plays: on from there, to the end
+            _pump(lambda: len(played) == 3)
+            self.assertEqual((played[2], w.wave.playhead), (("service.mkv", 4400.0, 40.0), 4400.0))
+            _pump(lambda: w.line and w.line["started"])
+            w.player.until = 0.0  # the recording is over
+            w.line["started"] -= 40.0
+            _pump(lambda: w.playing is None and w.line_btn.text() == "Play")
+            self.assertEqual((w.playing, w.wave.playhead, w.line_btn.text()), (None, 4440.0, "Play"))
+            w.player.until = time.time() + 9999
+            w.line_btn.click()  # at the very end: from the start cut again
+            _pump(lambda: len(played) == 4)
+            self.assertEqual(played[3], ("service.mkv", 542.0, 60))
+            _pump(lambda: w.line and w.line["started"])
+            w.line["started"] -= 60.0  # a piece is over before the end: the next one follows
+            _pump(lambda: len(played) == 5)
+            self.assertEqual(played[4], ("service.mkv", 602.0, 60))
+            w.stop_playing()
+            w.wave.sought.emit(100.0)  # a click while nothing plays only moves the marker
+            _pump(seconds=0.3)
+            self.assertEqual((len(played), w.playing), (5, None))
+
+    def test_only_the_newest_piece_plays(self):
+        """Pause while a piece is still being cut: it is stopped as soon as it starts."""
+        import threading
+        go, stops = threading.Event(), []
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}), \
+                mock.patch.object(mainwindow.player.Player, "play", side_effect=lambda *a: go.wait(5)), \
+                mock.patch.object(mainwindow.player.Player, "stop", side_effect=lambda: stops.append(1)):
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.wave.set_length(4440.0)
+            w.wave.set_cut("start", 542.0)
+            w.wave.set_cut("end", 4095.0)
+            w.job = {"path": "service.mkv"}
+            w.play_line()
+            w.play_line()  # paused at once
+            n = len(stops)
+            go.set()
+            _pump(lambda: len(stops) > n)
+            self.assertEqual((len(stops), w.playing, w.line_btn.text()), (n + 1, None, "Play"))
 
     def test_times_are_typed(self):
         self.assertEqual([ui.parse_clock(t) for t in ("9:02", "9:02.4", "1:08:15", "542", "542,5", " 0:07 ")],

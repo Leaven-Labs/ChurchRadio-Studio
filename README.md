@@ -143,12 +143,17 @@ dim parts before and after are cut off.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/cuts-dark.png">
-    <img src="docs/screenshots/cuts.png" width="780" alt="Where the service is cut: the recording with the start and end markers, and a close-up of each cut">
+    <img src="docs/screenshots/cuts.png" width="780" alt="Where the service is cut: the recording with the start and end markers, the play marker, and Play, the zoom buttons and the cut times under it">
   </picture>
 </p>
 
 - **Play from start cut** / **Play to end cut** play the 12 seconds the service will start and end
   with. Click again to stop.
+- **Listen anywhere.** Click in the picture, beside the cut markers, to put the **play marker** there
+  (or drag it along), then click **Play** under the picture or press the **space bar**. The marker
+  moves as the recording plays; **Pause** (or the space bar again) stops it where it is. A click
+  somewhere else while it plays goes on from there. The time next to **Play** is where the marker
+  is: type it into the **Start** or **End** box to put a cut there.
 - **Drag a marker** to move a cut, or use the buttons under the picture (**−5 s**, **−1 s**, **+1 s**,
   **+5 s**; left for the start, right for the end). A marker at the very start or end of the
   recording cuts nothing there.
@@ -156,10 +161,10 @@ dim parts before and after are cut off.
   Empty the box to cut nothing there.
 - **Zoom** into the picture with **+** and **−**, or hold **Ctrl** and turn the mouse wheel where you
   want to look. **Start cut** and **End cut** show two minutes around a cut; **Whole recording**
-  zooms all the way out. Zoomed in, the bar under the picture (or a drag of the picture itself) moves
-  along the recording, and a marker that is out of sight waits at the edge of the picture.
-- **Place a cut exactly** in the two **close-ups**. Each shows the 40 seconds around one cut, so the
-  pauses between words can be seen. Click or drag there; the time is exact to a tenth of a second.
+  zooms all the way out. Zoomed in, the bar under the picture (or Shift and the mouse wheel) moves
+  along the recording, and a cut marker that is out of sight waits at the edge of the picture.
+  Zoomed in far enough, the pauses between words can be seen and a cut is placed to a tenth of a
+  second.
 - Click **Make the broadcast again**. The app does not listen for the words again, so this is quick,
   and the new MP3 replaces the first one.
 
@@ -617,7 +622,7 @@ their own setting. Run the script again after the look of the app changes.
 |---|---|
 | `app.py` | Starts the app: the window, or `--build` / `--selftest` / `--uitest` from the command line. |
 | `mainwindow.py` | The main window: the menu at the left, the Broadcast and History pages. |
-| `ui.py` | The look: colours, the style sheet, the service date box, the picture of the recording and the close-ups. |
+| `ui.py` | The look: colours, the style sheet, the service date box, the picture of the recording. |
 | `player.py` | Plays a piece of the recording (the cuts) with the system's own sound player. |
 | `updates.py` | Looks for a new version on GitHub, downloads it, checks it and starts its installer. |
 | `cli.py` | `--build`: making the broadcast with no window. |

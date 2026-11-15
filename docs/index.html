@@ -12,136 +12,183 @@
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <style>
+  @font-face { font-family: "Fraunces"; src: url("fonts/fraunces-latin-opsz-normal.woff2") format("woff2");
+               font-weight: 100 900; font-style: normal; font-display: swap; }
+  @font-face { font-family: "Instrument Sans"; src: url("fonts/instrument-sans-latin-wght-normal.woff2") format("woff2");
+               font-weight: 400 700; font-style: normal; font-display: swap; }
+  /* The app's own colours: navy, the blue of the service, the green of the songs, and gold. The look
+     (type, gradient panels, ruled lists) is shared with www.leavenlabs.org. */
   :root {
-    --bg: #f4f5f8; --card: #ffffff; --text: #1c2330; --sub: #5b6577; --line: #e1e4ea;
-    --accent: #2f6fd0; --accent2: #255bb0; --soft: #eaf1fc;
-    --navy: #1f3a68; --gold: #f2c14e; --intro: #8b6fe0; --song: #2aa98c;
-    --on-accent: #ffffff; --shadow: 0 1px 2px rgba(28, 35, 48, .06), 0 12px 32px rgba(28, 35, 48, .08);
+    --bg: #f6f7fb; --surface: #ffffff; --ink: #172544; --sub: #5b6577; --line: #e1e4ea; --wash: #edf1f8;
+    --accent: #2a63bd; --t1: #2f6fd0; --t2: #1c9a80; --bar-text: #ffffff; --service: #2f6fd0;
+    --g1: #1f3a68; --g2: #2f6fd0; --g3: #2aa98c; --spark: #f2c14e; --panel: #152848;
+    --intro: #8b6fe0; --song: #2aa98c;
+    --shadow: 0 1px 2px rgba(23, 37, 68, .06), 0 18px 40px rgba(23, 37, 68, .12);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14171c; --card: #1f232d; --text: #e8ebf0; --sub: #a3acba; --line: #2c323d;
-      --accent: #5b93e8; --accent2: #7aa8ee; --soft: #1a2434;
+      --bg: #14171c; --surface: #1f232d; --ink: #e8ebf0; --sub: #a3acba; --line: #2c323d; --wash: #191d25;
+      --accent: #7aa8ee; --t1: #7aa8ee; --t2: #45c4a8; --bar-text: #0f1522; --service: #5b93e8;
       --intro: #a78bfa; --song: #45c4a8;
-      --on-accent: #0f1522; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 32px rgba(0, 0, 0, .35);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px rgba(0, 0, 0, .4);
     }
+  }
+  :root {
+    --grad: linear-gradient(120deg, var(--g1), var(--g2) 55%, var(--g3));
+    --display: "Fraunces", Georgia, "Times New Roman", serif;
+    --body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    -webkit-text-size-adjust: 100%;
-  }
-  a { color: var(--accent); }
-  a:hover { color: var(--accent2); }
-  :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-radius: 6px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--body);
+         -webkit-text-size-adjust: 100%; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--spark); outline-offset: 3px; border-radius: 6px; }
   img { max-width: 100%; height: auto; display: block; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; margin: 0;
+               text-wrap: balance; }
+  p { margin: 0; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-left: 20px; padding-right: 20px; }
+  .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--sub);
+             margin-bottom: 12px; }
+  .eyebrow a { color: inherit; text-decoration: none; }
+  .eyebrow a:hover { text-decoration: underline; }
+  .gradtext { background: linear-gradient(100deg, var(--t1), var(--t2)); -webkit-background-clip: text;
+              background-clip: text; color: transparent; }
 
   /* top bar */
-  header.top { padding: 18px 0; }
-  header.top .wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 18px;
-           color: var(--text); text-decoration: none; margin-right: auto; }
+  header.top .wrap { display: flex; align-items: center; gap: 12px 28px; flex-wrap: wrap; padding-top: 22px;
+                     padding-bottom: 22px; }
+  .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none;
+           font: 600 22px/1 var(--display); letter-spacing: -.02em; margin-right: auto; }
   .brand img { width: 40px; height: 40px; }
-  nav.links { display: flex; gap: 22px; flex-wrap: wrap; font-size: 16px; }
+  nav.links { display: flex; gap: 6px 26px; flex-wrap: wrap; font-weight: 500; font-size: 16px; }
   nav.links a { color: var(--sub); text-decoration: none; }
-  nav.links a:hover { color: var(--text); text-decoration: underline; }
+  nav.links a:hover { color: var(--ink); text-decoration: underline; }
+  nav.links a[aria-current] { color: var(--ink); font-weight: 600; }
 
-  /* hero */
-  .hero { padding: 44px 0 20px; text-align: center; }
-  h1 { font-size: clamp(2.1rem, 5.4vw, 3.5rem); line-height: 1.1; letter-spacing: -.025em;
-       margin: 0 auto 18px; max-width: 16ch; text-wrap: balance; }
-  .lead { font-size: clamp(1.05rem, 2vw, 1.25rem); color: var(--sub); max-width: 62ch; margin: 0 auto 28px;
-          text-wrap: pretty; }
-  .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 10px;
-         font-weight: 600; text-decoration: none; border: 1px solid var(--line); background: var(--card);
-         color: var(--text); }
-  .btn:hover { color: var(--text); border-color: var(--sub); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .btn.primary:hover { background: var(--accent2); border-color: var(--accent2); color: var(--on-accent); }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 12px;
+         font-weight: 600; text-decoration: none; color: var(--ink); background: var(--surface);
+         border: 1px solid var(--line); }
+  .btn:hover { border-color: var(--sub); }
+  .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); position: relative; }
+  .btn.primary::after { content: ""; position: absolute; inset: auto 14px -5px; height: 12px; border-radius: 50%;
+                        background: var(--grad); filter: blur(12px); opacity: .8; z-index: -1; }
   .btn svg { width: 20px; height: 20px; flex: none; }
-  .fine { color: var(--sub); font-size: 15px; margin: 16px 0 0; }
 
-  /* the hour */
-  .hour { max-width: 760px; margin: 44px auto 0; text-align: left; }
-  .hour .bar { display: flex; height: 54px; border-radius: 12px; overflow: hidden; gap: 3px; }
-  .hour .bar span { display: flex; align-items: center; padding: 0 14px; color: #fff; font-weight: 600;
-                    font-size: 15px; white-space: nowrap; overflow: hidden; }
-  .hour .i { flex: 0 0 9%; background: var(--intro); }
-  .hour .s { flex: 1 1 auto; background: #2f6fd0; }
-  .hour .g { flex: 0 0 10%; background: var(--song); }
-  @media (prefers-color-scheme: dark) { .hour .bar span { color: #0f1522; } .hour .s { background: #5b93e8; } }
-  @media (max-width: 560px) { .hour .i, .hour .g { font-size: 0; padding: 0; } }
-  .hour ol { list-style: none; margin: 12px 0 0; padding: 0; display: flex; gap: 6px 22px; flex-wrap: wrap;
-             color: var(--sub); font-size: 15px; }
-  .hour li::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px;
-                     margin-right: 8px; background: var(--c); }
-  .hour li:last-child { margin-left: auto; color: var(--text); font-weight: 600;
-                        font-variant-numeric: tabular-nums; }
-  .hour li:last-child::before { display: none; }
+  .rule { height: 4px; background: var(--grad); margin-top: 84px; }
+  footer { color: var(--sub); font-size: 15px; }
+  footer .wrap { padding-top: 30px; padding-bottom: 48px; display: grid; gap: 8px; }
+  footer p { max-width: 80ch; }
+  footer .copy { color: var(--ink); font-weight: 600; }
+  .from { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none;
+          font: 600 19px/1 var(--display); letter-spacing: -.02em; margin-bottom: 10px; justify-self: start; }
+  .from svg { width: 15px; height: 30px; flex: none; }
+  .from span { font: 500 15px var(--body); letter-spacing: 0; color: var(--sub); }
 
-  .shot { margin: 40px auto 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
-          box-shadow: var(--shadow); background: var(--card); }
+  /* hero: the words at the left, the app's idea on a gradient panel at the right */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 48px; align-items: center;
+          padding-top: 36px; padding-bottom: 56px; }
+  .hero h1 { font-size: clamp(2.4rem, 5.6vw, 4rem); }
+  .lead { font-size: clamp(1.08rem, 1.6vw, 1.25rem); color: var(--sub); max-width: 54ch; margin-top: 20px; }
+  .fine { color: var(--sub); font-size: 15px; margin-top: 18px; }
+  .panel { position: relative; isolation: isolate; overflow: hidden; border-radius: 32px; background: var(--grad);
+           padding: clamp(18px, 3vw, 34px); display: grid; align-content: center; min-height: 360px;
+           box-shadow: var(--shadow); }
+  .panel::before, .panel::after { content: ""; position: absolute; z-index: -1; border-radius: 50%; filter: blur(46px); }
+  .panel::before { width: 70%; height: 70%; left: -18%; top: -20%; background: var(--g3); opacity: .7;
+                   animation: drift 16s ease-in-out infinite alternate; }
+  .panel::after { width: 76%; height: 76%; right: -24%; bottom: -26%; background: var(--g1); opacity: .8;
+                  animation: drift 20s ease-in-out infinite alternate-reverse; }
+  @keyframes drift { to { transform: translate(14%, 10%) scale(1.15); } }
+  @media (prefers-reduced-motion: reduce) { .panel::before, .panel::after { animation: none; } }
+  .demo { background: var(--surface); border-radius: 18px; padding: 20px 22px; text-align: left;
+          box-shadow: 0 10px 40px rgba(10, 8, 40, .3); }
+  .stage { background: var(--grad); border-radius: 28px; overflow: hidden;
+           padding: clamp(18px, 4vw, 48px) clamp(18px, 4vw, 48px) 0; }
+  .stage img, .split .shot img { width: 100%; border-radius: 10px 10px 0 0; box-shadow: 0 10px 40px rgba(10, 8, 40, .35); }
 
   /* sections */
-  section { padding: 72px 0 0; }
-  h2 { font-size: clamp(1.6rem, 3.4vw, 2.2rem); line-height: 1.2; letter-spacing: -.02em; margin: 0 0 10px;
-       text-wrap: balance; }
-  .intro { color: var(--sub); max-width: 64ch; margin: 0 0 30px; }
-  .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
-             color: var(--accent); margin: 0 0 8px; }
+  section.wrap { padding-top: 84px; }
+  .band { background: var(--wash); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+          margin-top: 84px; padding: 72px 0; }
+  h2 { font-size: clamp(1.9rem, 3.6vw, 2.6rem); }
+  h3 { font-size: 1.28rem; line-height: 1.2; }
+  .intro { color: var(--sub); max-width: 60ch; margin-top: 12px; }
 
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;
-           counter-reset: step; list-style: none; padding: 0; margin: 0; }
-  .steps li { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px;
-              counter-increment: step; }
-  .steps li::before { content: counter(step); display: grid; place-items: center; width: 34px; height: 34px;
-                      border-radius: 50%; background: var(--navy); color: var(--gold); font-weight: 700;
-                      margin-bottom: 12px; }
-  h3 { font-size: 1.1rem; margin: 0 0 6px; line-height: 1.3; }
-  .steps p, .feat p { margin: 0; color: var(--sub); font-size: 16px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 36px;
+           counter-reset: step; list-style: none; padding: 0; margin: 40px 0 0; }
+  .steps li { border-top: 1px solid var(--line); padding: 20px 0 26px; counter-increment: step; display: grid;
+              gap: 8px; align-content: start; }
+  .steps li::before { content: counter(step); font: 600 2.7rem/1 var(--display); justify-self: start;
+                      background: linear-gradient(100deg, var(--t1), var(--t2)); -webkit-background-clip: text;
+                      background-clip: text; color: transparent; }
+  .steps p, .feat p { color: var(--sub); font-size: 16px; }
 
-  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
-  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
-  .feat svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 12px; display: block; }
+  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 44px; margin-top: 40px; }
+  .feat { border-top: 1px solid var(--line); padding: 24px 0 28px; display: grid; gap: 8px; align-content: start; }
+  .feat svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 4px; }
   .feat q { font-style: italic; }
+  .feat code { color: var(--accent); font-size: .92em; }
 
-  .split { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: center; }
-  @media (min-width: 900px) { .split { grid-template-columns: 5fr 7fr; } }
-  .split .shot { margin: 0; }
-  .split ul { padding-left: 1.2em; margin: 0; color: var(--sub); }
-  .split li { margin: 6px 0; }
-  .split li strong { color: var(--text); }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; align-items: center; }
+  @media (min-width: 900px) { .split { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+                              .split.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); } }
+  .split ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 8px; color: var(--sub); }
+  .split li { padding-left: 22px; position: relative; }
+  .split li::before { content: ""; position: absolute; left: 0; top: .72em; width: 10px; height: 3px;
+                      border-radius: 2px; background: var(--grad); }
+  .split li strong { color: var(--ink); }
+  .split .shot { background: var(--grad); border-radius: 24px; overflow: hidden;
+                 padding: clamp(16px, 3vw, 32px) clamp(16px, 3vw, 32px) 0; }
 
-  /* download */
-  .dl { background: var(--navy); color: #fff; border-radius: 20px; padding: clamp(26px, 5vw, 48px);
-        margin-top: 72px; }
-  .dl h2 { color: #fff; }
-  .dl p { color: #c9d4e6; max-width: 64ch; }
-  .dl a { color: var(--gold); }
-  .os { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 26px 0 22px; }
-  .os a { display: block; background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .18);
-          border-radius: 14px; padding: 20px; text-decoration: none; color: #fff; }
-  .os a:hover { background: rgba(255, 255, 255, .13); border-color: var(--gold); color: #fff; }
-  .os strong { display: block; font-size: 1.15rem; }
-  .os span { display: block; color: #c9d4e6; font-size: 15px; margin-top: 2px; }
-  .os code { display: block; margin-top: 12px; color: var(--gold); font-size: 13px; overflow-wrap: anywhere;
-             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .dl .btn.gold { background: var(--gold); border-color: var(--gold); color: #1c2330; }
-  .dl .btn.gold:hover { background: #f7d27a; color: #1c2330; }
-  .dl .btn.ghost { background: transparent; border-color: rgba(255, 255, 255, .35); color: #fff; }
-  .dl .btn.ghost:hover { border-color: #fff; color: #fff; }
-  .dl .actions { justify-content: flex-start; }
-  .dl .note { font-size: 15px; margin: 22px 0 0; }
+  /* download: one dark panel, the same in both themes */
+  .dl { position: relative; isolation: isolate; overflow: hidden; margin-top: 84px; border-radius: 28px;
+        padding: clamp(26px, 5vw, 52px); color: #fff;
+        background: radial-gradient(60% 90% at 100% 0%, color-mix(in srgb, var(--g2) 60%, transparent), transparent 70%),
+                    radial-gradient(50% 80% at 0% 100%, color-mix(in srgb, var(--g3) 45%, transparent), transparent 70%),
+                    var(--panel); }
+  .dl p { color: #d6dbea; max-width: 64ch; margin-top: 12px; }
+  .dl a { color: var(--spark); }
+  .os { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 28px 0 0; }
+  .os a { display: block; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .2);
+          border-radius: 16px; padding: 20px; text-decoration: none; color: #fff; }
+  .os a:hover { background: rgba(255, 255, 255, .14); border-color: var(--spark); }
+  .os strong { display: block; font: 600 1.35rem/1.2 var(--display); letter-spacing: -.02em; }
+  .os span { display: block; color: #d6dbea; font-size: 15px; margin-top: 4px; }
+  .os code { display: block; margin-top: 12px; color: var(--spark); font-size: 13px; overflow-wrap: anywhere; }
+  .dl .btn.gold, .dl .btn.main { background: var(--spark); border-color: var(--spark); color: #14162a; }
+  .dl .btn.ghost { background: transparent; border-color: rgba(255, 255, 255, .4); color: #fff; }
+  .dl .btn.ghost:hover { border-color: #fff; }
+  .dl .note { font-size: 15px; margin-top: 22px; }
 
-  footer { padding: 56px 0 48px; color: var(--sub); font-size: 15px; }
-  footer .wrap { border-top: 1px solid var(--line); padding-top: 28px; }
-  footer p { margin: 0 0 8px; max-width: 80ch; }
-  footer .copy { color: var(--text); font-weight: 600; }
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: minmax(0, 1fr); gap: 32px; padding-top: 16px; }
+    .panel { min-height: 0; }
+    section.wrap, .band, .dl, .rule { margin-top: 0; }
+    section.wrap { padding-top: 60px; }
+    .band { margin-top: 60px; padding: 52px 0; }
+    .dl, .rule { margin-top: 60px; }
+  }
+
+  /* the hour */
+  .hour .bar { display: flex; height: 54px; border-radius: 12px; overflow: hidden; gap: 3px; }
+  .hour .bar span { display: flex; align-items: center; padding: 0 14px; color: var(--bar-text); font-weight: 600;
+                    font-size: 15px; white-space: nowrap; overflow: hidden; }
+  .hour .i { flex: 0 0 9%; background: var(--intro); }
+  .hour .s { flex: 1 1 auto; background: var(--service); }
+  .hour .g { flex: 0 0 10%; background: var(--song); }
+  .hour .bar .i, .hour .bar .g { font-size: 0; padding: 0; }
+  .hour ol { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; color: var(--sub); font-size: 15px; }
+  .hour li::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+                     margin-right: 9px; background: var(--c); }
+  .hour li:last-child { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; color: var(--ink);
+                        font: 600 1.7rem/1 var(--display); font-variant-numeric: tabular-nums; }
+  .hour li:last-child::before { display: none; }
+  .hour li:last-child::after { content: " on the air"; font: 500 15px var(--body); color: var(--sub); }
 </style>
 </head>
 <body>
@@ -160,7 +207,9 @@
 
 <main id="top">
   <div class="wrap hero">
-    <h1>Your Sunday service, ready for the radio</h1>
+    <div>
+    <p class="eyebrow"><a href="https://www.leavenlabs.org">A Leaven Labs project</a></p>
+    <h1>Your Sunday service, ready for the <span class="gradtext">radio</span></h1>
     <p class="lead">ChurchRadio Studio is a free app for churches that put their service on the radio, a podcast
       or a website. Drop the week's recording on the window and it makes one ready-to-air MP3.</p>
     <div class="actions">
@@ -172,18 +221,22 @@
         Source code</a>
     </div>
     <p class="fine">Free, for Windows, Mac and Linux. No account, nothing to pay.</p>
-
-    <div class="hour" role="img" aria-label="One hour of broadcast: a short intro, then the service, then songs that fill the rest, 59 minutes 58 seconds in all">
+    </div>
+    <div class="panel">
+    <div class="demo hour" role="img" aria-label="One hour of broadcast: a short intro, then the service, then songs that fill the rest, 59 minutes 58 seconds in all">
       <div class="bar"><span class="i">Intro</span><span class="s">The service</span><span class="g">Songs</span></div>
       <ol>
         <li style="--c: var(--intro)">Your intro</li>
-        <li style="--c: var(--accent)">The service, cut at its start and end</li>
+        <li style="--c: var(--service)">The service, cut at its start and end</li>
         <li style="--c: var(--song)">Songs that fill the rest</li>
         <li>59:58</li>
       </ol>
     </div>
+    </div>
+  </div>
 
-    <div class="shot">
+  <div class="wrap">
+    <div class="stage">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="screenshots/broadcast-dark.png">
         <img src="screenshots/broadcast.png" width="2360" height="2020"
@@ -204,7 +257,8 @@
     </ol>
   </section>
 
-  <section class="wrap" id="features">
+  <section class="band" id="features">
+  <div class="wrap">
     <p class="eyebrow">Features</p>
     <h2>What it does for you</h2>
     <p class="intro">Made for one job, the weekly church broadcast, and set up with the words your own church says.</p>
@@ -254,6 +308,7 @@
         <h3>Light or dark, and kept up to date</h3>
         <p>The app follows your computer's look, and tells you when a new version is ready to install.</p>
       </div>
+    </div>
     </div>
   </section>
 
@@ -322,11 +377,13 @@
   </div>
 </main>
 
+<div class="rule"></div>
 <footer>
   <div class="wrap">
+    <a class="from" href="https://www.leavenlabs.org"><svg viewBox="0 0 120 240" aria-hidden="true"><defs><linearGradient id="ll" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#e0447f"/><stop offset="1" stop-color="#ffb52e"/></linearGradient></defs><g fill="currentColor"><rect x="54" y="56" width="12" height="180" rx="6"/><ellipse cx="88" cy="88" rx="29" ry="15" transform="rotate(-34 88 88)"/><ellipse cx="32" cy="88" rx="29" ry="15" transform="rotate(34 32 88)"/><ellipse cx="88" cy="128" rx="29" ry="15" transform="rotate(-34 88 128)"/><ellipse cx="32" cy="128" rx="29" ry="15" transform="rotate(34 32 128)"/><ellipse cx="88" cy="168" rx="29" ry="15" transform="rotate(-34 88 168)"/><ellipse cx="32" cy="168" rx="29" ry="15" transform="rotate(34 32 168)"/></g><ellipse cx="60" cy="32" rx="15" ry="29" fill="url(#ll)"/></svg>Leaven Labs <span>Free, open-source software for churches.</span></a>
     <p class="copy">Copyright &copy; 2026 Aaron Steger.</p>
     <p>Created by Aaron Steger for Bethany Lutheran Church, Fredericksburg, Texas, and shared so other
-      congregations can use it. Published by <a href="https://leavenlabs.org">Leaven Labs</a>.</p>
+      congregations can use it. Published by <a href="https://www.leavenlabs.org">Leaven Labs</a>.</p>
     <p>Free software under the
       <a href="https://github.com/Leaven-Labs/ChurchRadio-Studio/blob/main/LICENSE">MIT License</a>: anyone may use,
       copy, change and share it, as long as the copyright notice and license are kept with it. The downloads include

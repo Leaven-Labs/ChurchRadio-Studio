@@ -42,7 +42,7 @@ title, when you look songs up with **Check public domain**, and a question to Gi
 version's number when the app starts ([Updating](#updating); it can be turned off).
 
 Created by **Aaron Steger** for **Bethany Lutheran Church**, Fredericksburg, Texas, and shared so
-other congregations can use it. Published by [Leaven Labs](https://leavenlabs.org) under the
+other congregations can use it. Published by [Leaven Labs](https://www.leavenlabs.org) under the
 [MIT License](LICENSE). Developed with the help of [Claude Code](https://claude.com/claude-code).
 
 **Contents:** [Install](#install) · [First start](#first-start-the-setup-wizard) ·
@@ -677,5 +677,5 @@ To report a security problem, please don't open a public issue: see [SECURITY.md
 Free software under the **[MIT License](LICENSE)**: anyone may use, copy, change and share it,
 including for other churches, as long as the copyright notice and license are kept with it.
 
-Copyright (c) 2026 **Aaron Steger**. Published by **[Leaven Labs](https://leavenlabs.org)**. The
+Copyright (c) 2026 **Aaron Steger**. Published by **[Leaven Labs](https://www.leavenlabs.org)**. The
 app's **About** box shows the author, publisher, version and license.

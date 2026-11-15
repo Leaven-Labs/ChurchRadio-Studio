@@ -112,7 +112,7 @@ def main():
     import ui
 
     mp3 = example_data()
-    paths.version = lambda: "1.5.0"  # (from the source code it says "development")
+    paths.version = lambda: "1.5.1"  # (from the source code it says "development")
     app = ui.start_app(["screenshots"], "light")
     for theme in ("light", "dark"):  # every picture twice: name.png and name-dark.png
         cfg = builder.load_config()

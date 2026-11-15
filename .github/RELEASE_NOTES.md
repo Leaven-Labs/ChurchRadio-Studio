@@ -10,11 +10,9 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.5.0
+## What's new in 1.5.1
 
-- **Listen anywhere in the recording.** Click in the picture of the recording to put a play marker there, or drag it along. **Play** under the picture plays from the marker and **Pause** stops it there; the marker moves as it plays, and a click somewhere else goes on from there. The time next to **Play** says where the marker is.
-- **The space bar plays and pauses** on the Broadcast page.
-- **The close-ups of the cuts are gone.** The two small pictures under the recording took room and are not needed since the picture itself zooms in (1.4.0): zoom in with **+**, **Start cut** or **End cut** to place a cut to a tenth of a second.
-- Zoomed in, a drag in the picture now moves the play marker. To move along the recording, use the bar under the picture or hold **Shift** and turn the mouse wheel.
+- **A new icon.** The app is now a radio set with a cross for its dial, in the window, the taskbar and your applications menu. Nothing else about the app has changed.
+- **Leaven Labs has a home page:** [www.leavenlabs.org](https://www.leavenlabs.org). The installer and the README point there now.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

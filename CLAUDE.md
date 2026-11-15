@@ -57,6 +57,18 @@ item. Remove it from this file once it is built.
     again); Linux runs the download's `install.sh`; the Mac only opens the DMG.
   - Not yet tried on a real Windows PC, Mac or installed Linux: the install step (`updates.install`).
     The download, the checksum and the Linux unpack-and-install are covered by tests.
+- **1.5.0: the play marker, Play / Pause and the space bar; the close-ups are removed.**
+  `.github/RELEASE_NOTES.md` and the workflow's default tag are set for it. To release: merge, then
+  run the Release workflow (or push `v1.5.0`).
+  - The maintainer asked for the close-ups (`ui.CloseUp`, 1.3.0) to go: they cluttered the window
+    and the zoom replaces them. Do not bring them back unasked.
+  - `ui.Waveform.playhead` / `sought`: a click or drag beside the cuts puts the play marker (a drag
+    no longer moves the zoomed picture). `MainWindow.play_line` plays from it in pieces of
+    `LINE_SECONDS` (60 s), one after the other, with the same `player.py` (no Qt sound module);
+    `follow_line` moves the marker by the clock. Pause is stop-and-remember. `start_playing` /
+    `stop_playing` / `play_count` make sure only the newest piece asked for plays.
+  - Known limits: no sound while the marker is dragged (it plays from where it is let go), and a
+    short gap about once a minute where the next piece starts. Not yet heard on real hardware.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.
@@ -91,7 +103,8 @@ the maintainer asks what to build next. Remove an item once it is built.
 
 ### Usability (offered in November 2026, after the new look; not yet asked for)
 
-- Keyboard keys for the cuts (arrows to nudge, Space to play). (The cut times can be typed since 1.4.0.)
+- Keyboard keys for the cuts (arrows to nudge). Buttons "Start cut here" / "End cut here" that put a
+  cut at the play marker. (Typed cut times: 1.4.0. Space plays and pauses: 1.5.0.)
 - Remember the cuts per recording, so choosing the same recording again does not listen again.
 - Remember the window's size and position.
 - Read the service fewer times in one build (the silence cut inside the MP3 step, no temporary WAV).

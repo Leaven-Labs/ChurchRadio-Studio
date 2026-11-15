@@ -10,13 +10,11 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.4.0
+## What's new in 1.5.0
 
-- **Zoom into the recording.** Under the picture of the recording: **+** and **−** (or hold **Ctrl** and turn the mouse wheel), **Start cut** and **End cut** to look at a cut from near, and **Whole recording**. Zoomed in, a bar under the picture moves along the recording, and a marker can be dragged to a fraction of a second.
-- **Type a cut's time.** The **Start** and **End** boxes under the picture show where the cuts are. Type a time (`9:02`, `9:02.4`, `1:08:15`) and press Enter to put a cut there; empty the box to cut nothing. The app still finds both cuts by itself first, as before.
-- **How much is kept at the end.** **Settings → Service words** has two new numbers: the seconds kept after the pastor's last words (5 at first) and after the congregation's answer (0.5 at first).
-- **Updates from inside the app.** When the app starts it asks GitHub whether there is a newer version, and the Broadcast page offers **Update now**. On Windows and Linux the new version is downloaded, checked against its checksum and installed over this one, and the app opens again; on a Mac the download is opened for you to drag onto Applications. **About → Check for updates** looks when you ask. To turn the check at the start off: **Settings → Your broadcast → Look for a new version when the app starts**. Only the app's version number is sent.
-
-The first update that can be done from inside the app is the one after 1.4.0: install this version by hand once more. The long date in the file name (`November 15, 2026`) is under **Settings → Your broadcast → Date in the file name → Long**, as since 1.3.0.
+- **Listen anywhere in the recording.** Click in the picture of the recording to put a play marker there, or drag it along. **Play** under the picture plays from the marker and **Pause** stops it there; the marker moves as it plays, and a click somewhere else goes on from there. The time next to **Play** says where the marker is.
+- **The space bar plays and pauses** on the Broadcast page.
+- **The close-ups of the cuts are gone.** The two small pictures under the recording took room and are not needed since the picture itself zooms in (1.4.0): zoom in with **+**, **Start cut** or **End cut** to place a cut to a tenth of a second.
+- Zoomed in, a drag in the picture now moves the play marker. To move along the recording, use the bar under the picture or hold **Shift** and turn the mouse wheel.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

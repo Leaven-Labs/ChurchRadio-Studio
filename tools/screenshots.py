@@ -112,7 +112,7 @@ def main():
     import ui
 
     mp3 = example_data()
-    paths.version = lambda: "1.4.0"  # (from the source code it says "development")
+    paths.version = lambda: "1.5.0"  # (from the source code it says "development")
     app = ui.start_app(["screenshots"], "light")
     for theme in ("light", "dark"):  # every picture twice: name.png and name-dark.png
         cfg = builder.load_config()
@@ -147,6 +147,7 @@ def pictures(app, window, mp3, ending):
     window.wave_card.show()
     window.wave.set_levels([min(1.0, 1.25 * sum(detail[i * step:(i + 1) * step]) / step) for i in range(600)], detail, per)
     window.wave.set_length(length)
+    window.wave.set_playhead(1325.0)  # the play marker
     window.told("start", start)
     window.told("end", end)
     window.told("silence", 41.5)

@@ -340,7 +340,7 @@ def cut_clip(src, dst, start, seconds):
     return dst
 
 
-DETAIL_PER_SECOND = 20  # the close-ups of the cuts: this many loudness numbers for each second
+DETAIL_PER_SECOND = 20  # the picture of the recording, zoomed in: this many loudness numbers for each second
 
 
 def loudness_picture(path, buckets=600, per_second=DETAIL_PER_SECOND, rate=2000):
@@ -348,7 +348,7 @@ def loudness_picture(path, buckets=600, per_second=DETAIL_PER_SECOND, rate=2000)
 
     outline: `buckets` numbers from 0 to 1, each the loudness (RMS) of one equal slice of the
     whole recording, scaled so that its loud parts are near 1. detail: the same, but `per_second`
-    numbers for every second (for the close-ups of the cuts). ffmpeg plays the sound out as mono at
+    numbers for every second (drawn when the picture is zoomed in). ffmpeg plays the sound out as mono at
     a low sample rate for it."""
     import numpy as np
     p = run_tool([find_tool("ffmpeg"), "-v", "error", "-nostdin", "-i", path, "-vn", "-ac", "1",

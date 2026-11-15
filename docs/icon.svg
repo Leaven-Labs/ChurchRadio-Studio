@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <title>ChurchRadio Studio</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#1f3a68"/>
+  <!-- radio waves -->
+  <g fill="none" stroke="#f2c14e" stroke-width="13" stroke-linecap="round">
+    <path d="M168 78 a52 52 0 0 1 0 74"/>
+    <path d="M190 58 a82 82 0 0 1 0 114"/>
+    <path d="M88 78 a52 52 0 0 0 0 74"/>
+    <path d="M66 58 a82 82 0 0 0 0 114"/>
+  </g>
+  <!-- church: steeple + cross + body -->
+  <g fill="#ffffff">
+    <rect x="124" y="36" width="8" height="34" rx="2"/>
+    <rect x="113" y="45" width="30" height="8" rx="2"/>
+    <path d="M128 68 L150 104 L150 112 L106 112 L106 104 Z"/>
+    <rect x="106" y="110" width="44" height="34"/>
+    <path d="M92 144 L164 144 L164 206 L92 206 Z"/>
+    <path d="M86 150 L128 122 L170 150 Z"/>
+  </g>
+  <path d="M118 206 v-26 a10 10 0 0 1 20 0 v26 z" fill="#1f3a68"/>
+</svg>

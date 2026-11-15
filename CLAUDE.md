@@ -72,6 +72,11 @@ item. Remove it from this file once it is built.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.
+- **The website (`docs/`) and the icon (November 2026).** The site has the look of www.leavenlabs.org
+  (Fraunces and Instrument Sans, kept in `docs/fonts` so nothing is loaded from another server; gradient
+  panels; ruled lists) in the app's own colours. The icon is a radio set with a cross for its dial;
+  `assets/icon.ico` holds a thicker drawing for 40 pixels and smaller. Leaven Labs' address is
+  `https://www.leavenlabs.org` (with the `www`).
 - Download size matters to the maintainer. The cheapest saving, on any toolkit, is a smaller ffmpeg
   for Windows and Linux (built with only what the app uses, as the Mac job already does).
 

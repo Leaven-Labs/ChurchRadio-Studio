@@ -474,8 +474,8 @@ editor for the rest (close the app first).
 | `end_alt_window` / `end_alt_pad` | `20` / `0.5` | As above, for `end_alt_phrase`. |
 | `end_after_seconds` | `5` | If neither is heard: cut this long after the pastor's last words (on the Settings page). |
 | `end_search_minutes` | `10` | How much of the end is searched. |
-| `max_silence_seconds` / `silence_level_db` | `5` / `-40` | Silences in the service longer and quieter than this are shortened. |
-| `trim_song_silence` / `song_silence_db` | `true` / `-50` | Remove silence quieter than this at the start and end of songs. |
+| `max_silence_seconds` / `silence_level_db` | `5` / `-40` | Silences in the service longer and quieter than this are shortened to one second. Both are on the Settings page ("Shorten silences longer than", "What counts as silence"). |
+| `trim_song_silence` / `song_silence_db` | `true` / `-50` | Remove silence quieter than this at the start and end of songs. The first is a box on the Settings page; the level is set here only, and is used when a song is first measured. |
 | `check_song_words` / `song_min_words` | `true` / `6` | Turn off songs with fewer words than this (once per song). |
 | `avoid_repeat_weeks` | `4` | Songs used in this many recent broadcasts go last. |
 | `patriotic_holidays` | `memorial`, `independence`, `veterans` | Weekends that get patriotic songs. `labor` is also possible. |

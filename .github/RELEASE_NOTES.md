@@ -10,13 +10,11 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.5.2
+## What's new in 1.5.3
 
-- **The look of the website, in the app.** Its gradient of navy, blue and green, with gold for a spark, is on a line along the top of the window, the main buttons, the switches of the Songs page, the progress bar and the page titles, and the headings are in the website's typeface. Where things are and what they do has not changed.
-- **A soft glow** under the main buttons and under the card of the finished broadcast.
-- **Small animations.** A page fades in and a band of gold light crosses its title; the menu's marker slides; The hour fills once behind a gold needle; and a light runs along the top line while a broadcast is being made.
-- **Settings → Small animations** switches them off for a still window (`motion` in config.json). Nothing moves while the window is not shown.
+- **Silences in the service, on the Settings page.** Under "Service words" you can now say how long a silence must be before it is shortened ("Shorten silences longer than", 5 seconds unless you change it) and how quiet counts as silence. The second is a list in plain words, from "Only complete silence" to "Soft sounds too, such as a murmur or soft organ", with "A quiet room" as the usual choice. If quiet prayers or soft music are cut short, choose a line further up the list.
+- **Songs with or without their silence.** A new box under "Songs", "Remove the silence at the start and end of each song", is ticked as before. Untick it to play each song whole.
 
-The new look passed the automated tests but has not yet been seen on a real Windows PC or Mac. Please report anything that looks wrong or feels slow.
+These three were settings in config.json before; what they do has not changed, and your own values are kept.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

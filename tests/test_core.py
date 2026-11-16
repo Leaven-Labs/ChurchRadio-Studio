@@ -1822,6 +1822,27 @@ class Windows(unittest.TestCase):
         self.assertEqual((c["target_minutes"], c["theme"], c["end_answer_phrase"]), (45, "light", ""))
         self.assertEqual(c["patriotic_holidays"], ["memorial", "veterans"])
 
+    def test_settings_silence(self):
+        """How long and how quiet a silence in the service is shortened, and the songs' silence."""
+        w = self.wizard()
+        self.assertEqual((w.silence_seconds.text(), w.silence_level.currentData(), w.trim_songs.isChecked()),
+                         ("5", -40, True))
+        self.assertIn("the usual", w.silence_level.currentText())
+        w.silence_seconds.setText("7,5")
+        w.silence_level.setCurrentIndex(w.silence_level.findData(-30))
+        w.trim_songs.setChecked(False)
+        c = w.collect()
+        self.assertEqual((c["max_silence_seconds"], c["silence_level_db"], c["trim_song_silence"]), (7.5, -30, False))
+        own = self.wizard(max_silence_seconds=3, silence_level_db=-37, trim_song_silence=False)  # typed in config.json
+        self.assertEqual((own.silence_seconds.text(), own.silence_level.currentData(), own.trim_songs.isChecked()),
+                         ("3", -37, False))
+        self.assertIn("-37 dB", own.silence_level.currentText())
+        self.assertEqual(own.collect()["silence_level_db"], -37)
+        for bad in ("long", "0", "0.5", "121", "nan"):
+            w.silence_seconds.setText(bad)
+            with self.assertRaises(ValueError):
+                w.collect()
+
     def test_settings_end_timing_and_update_check(self):
         """The seconds kept after the pastor's last words and after the congregation's answer."""
         w = self.wizard()

@@ -90,7 +90,13 @@ item. Remove it from this file once it is built.
 - **1.5.2: the app in the website's look (below), nothing else.** `.github/RELEASE_NOTES.md` and the
   workflow's default tag are set for it. To release: merge, then run the Release workflow (or push
   `v1.5.2`).
-- **The app in the website's look (November 2026, asked for by the maintainer; set up as 1.5.2).**
+- **1.5.3: the silence settings on the Settings page, nothing else.** `.github/RELEASE_NOTES.md` and the
+  workflow's default tag are set for it. `max_silence_seconds` and `silence_level_db` are in the
+  "Service words" card (the level is a list in plain words, `setup_wizard.SILENCE_LEVELS`; a level typed
+  in config.json is listed too), `trim_song_silence` is a box in the "Songs" card. `song_silence_db` was
+  left in config.json on purpose: a song's silence is measured once and kept in songs.csv, so changing
+  the level would do nothing for songs already measured.
+- **The app in the website's look (November 2026, asked for by the maintainer; released in 1.5.2).**
   All of it is in `ui.py`: the gradient of navy, blue and green with gold (`g1` to `g3`, `spark`), the
   headings in Fraunces (`fraunces.py` carries the font as text, 22 KB, so no file is shipped and the spec
   is unchanged; its license goes into the license file through `tools/third_party_licenses.py`), a glow

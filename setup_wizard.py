@@ -39,6 +39,15 @@ def folder_size_mb(folder):
     return total / 1e6
 
 
+# How quiet counts as silence in the service (silence_level_db in config.json), in plain words.
+SILENCE_LEVELS = ((-50, "Only complete silence"), (-45, "A very quiet room"), (-40, "A quiet room (the usual)"),
+                  (-35, "Quiet sounds too, such as rustling"), (-30, "Soft sounds too, such as a murmur or soft organ"))
+
+
+def level_text(db, words):
+    return f"{words}  ·  {db:g} dB"
+
+
 class SettingsForm(QWidget):
     """The settings fields. wizard: one page at a time, with Back / Next (first_run: from the
     welcome page, and Finish only on the last page); else all of them on one page with Save.
@@ -167,6 +176,15 @@ class SettingsForm(QWidget):
         old_pad = c.get("end_answer_pad", prelude.END_ANSWER_PAD)
         if c.get("end_alt_pad", prelude.END_ALT_PAD) == old_pad:
             c["end_alt_pad"] = pad
+        try:
+            silence = float(self.silence_seconds.text().replace(",", "."))
+        except ValueError:
+            raise ValueError("The length of the silences that are shortened must be a number of seconds, "
+                             "for example 5.")
+        if not 1 <= silence <= 120:  # (not: nan)
+            raise ValueError("The length of the silences that are shortened must be 1 to 120 seconds.")
+        c.update(max_silence_seconds=silence, silence_level_db=self.silence_level.currentData(),
+                 trim_song_silence=self.trim_songs.isChecked())
         c.update(end_after_seconds=after, end_answer_pad=pad, check_updates=self.check_updates.isChecked())
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
                  date_format=self.date_format.currentData() or builder.DATE_FORMAT,
@@ -355,6 +373,11 @@ class SettingsForm(QWidget):
         self.body.addLayout(line)
         self.folder_note = ui.label("", "hint", wrap=True)
         self.body.addWidget(self.folder_note)
+        self.trim_songs = QCheckBox("Remove the silence at the start and end of each song")
+        self.trim_songs.setChecked(bool(self.cfg.get("trim_song_silence", True)))
+        self.trim_songs.setToolTip("The songs then follow each other, and the service, without a gap. Switched off, "
+                                   "each song is played whole, with any silence its file has.")
+        self.body.addWidget(self.trim_songs)
         self.count_songs()
 
     def add_folder(self):
@@ -402,6 +425,20 @@ class SettingsForm(QWidget):
         self.body.addWidget(ui.label("Leave the answer empty if your congregation does not answer; the "
                                      "cut is then after the pastor's last words. More seconds keep more of "
                                      "what follows (an Amen, the first notes of the organ).", "hint", wrap=True))
+        # Long silences inside the service (max_silence_seconds, silence_level_db in config.json).
+        self.silence_seconds = QLineEdit(f"{c.get('max_silence_seconds', 5):g}")
+        self.silence_level = QComboBox()
+        level = c.get("silence_level_db", -40)
+        levels = dict(SILENCE_LEVELS)
+        if level not in levels:  # a level typed in config.json is listed too
+            levels[level] = "Your own level"
+        for db in sorted(levels):
+            self.silence_level.addItem(level_text(db, levels[db]), db)
+        self.silence_level.setCurrentIndex(sorted(levels).index(level))
+        self.silence_level.setToolTip("Further down the list, more counts as silence, so more is shortened. If "
+                                      "quiet prayers or soft music are cut short, choose a line further up.")
+        self.row("Shorten silences longer than:", self.silence_seconds, "seconds; they are cut to one second", width=70)
+        self.row("What counts as silence:", self.silence_level, width=380)
         self.body.addSpacing(6)
         box = QGroupBox("Patriotic songs play only on the weekend of:")
         inside = QVBoxLayout(box)

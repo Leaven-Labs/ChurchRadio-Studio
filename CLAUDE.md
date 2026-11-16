@@ -87,6 +87,17 @@ item. Remove it from this file once it is built.
   page gives each `data-scroll` piece `--p` (how far it has gone through the window); with "reduce motion"
   all stays still. Turned down as too much, do not add unasked: gradient rules drawn over lists, and a
   glowing comet round a card's edge.
+- **The app in the website's look (November 2026, asked for by the maintainer; not yet in a release).**
+  All of it is in `ui.py`: the gradient of navy, blue and green with gold (`g1` to `g3`, `spark`), the
+  headings in Fraunces (`fraunces.py` carries the font as text, 22 KB, so no file is shipped and the spec
+  is unchanged; its license goes into the license file through `tools/third_party_licenses.py`), a glow
+  under the main buttons (`ui.primary(button)`, use it for new main buttons) and under the result card
+  (`ui.Underglow`), and small animations: a page fades in (`ui.Curtain`), a gold light crosses its title
+  (`ui.Title`), the menu's marker slides, The hour fills once behind a gold needle (`ui.HourBar`), and a
+  light runs along the top line during a build (`ui.Beam`). The clocks run only while the window is
+  shown (`ui.Moving`). `motion` in config.json (a box on the Settings page) turns the animations off.
+  The same look is in Stream Scheduler (0.0.7) in its own colours. Not yet seen on a real Windows PC or
+  Mac. No version, release notes or workflow tag are set for it yet.
 - Download size matters to the maintainer. The cheapest saving, on any toolkit, is a smaller ffmpeg
   for Windows and Linux (built with only what the app uses, as the Mac job already does).
 

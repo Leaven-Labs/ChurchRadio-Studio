@@ -1,16 +1,22 @@
 """The look of the app (Qt): colours for light and dark, the style sheet, and small shared parts.
 
 theme in config.json: "auto" (follow the system), "light" or "dark".
+
+The look is the website's (docs/index.html): its gradient of navy, blue and green with gold for a
+spark, its heading typeface (fraunces.py), a glow under what matters, and a few small animations.
+The animations run only while the window is shown; `motion` in config.json turns them off.
 """
+import math
 import os
 import re
 
-from PySide6.QtCore import QDate, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPainterPath, QPen,
-                           QPolygonF)
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDateEdit, QFrame, QHBoxLayout,
-                               QLabel, QMessageBox, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate,
-                               QWidget)
+from PySide6.QtCore import (QByteArray, QDate, QEasingCurve, QElapsedTimer, QEvent, QObject, QPointF, QRectF,
+                            QSize, Qt, QTimer, QVariantAnimation, Signal)
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QLinearGradient,
+                           QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient)
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDateEdit, QFrame,
+                               QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+                               QSizePolicy, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 import paths
 from churchyear import default_service_date
@@ -22,14 +28,21 @@ LIGHT = dict(bg="#f4f5f8", side="#ebedf2", card="#ffffff", text="#1c2330", sub="
              accent="#2f6fd0", accent2="#255bb0", soft="#eaf1fc", softline="#9dbcf0", log="#fbfbfc", sel="#e4edfb",
              hover="#eef0f4", ok="#1a7f4b", okbg="#e3f5ea", warn="#9a5b00", warnbg="#fdf1dc", no="#b42318",
              nobg="#fde8e6", off="#98a1b0", disabled="#b4bac4", intro="#8b6fe0", song="#2aa98c", track="#cfd4dc",
-             knob="#ffffff")
+             knob="#ffffff",
+             # the website's gradient (g1 to g3) and its gold, its gradient words (t1, t2), the buttons' gradient
+             g1="#1f3a68", g2="#2f6fd0", g3="#2aa98c", spark="#f2c14e", t1="#2f6fd0", t2="#1c9a80",
+             btn1="#2559b4", btn2="#2a86b6", glow=0.7)
 DARK = dict(bg="#14171c", side="#191c23", card="#1f232d", text="#e8ebf0", sub="#98a1b0", line="#2c323d",
             accent="#5b93e8", accent2="#4a80d4", soft="#1a2434", softline="#3d5f99", log="#191c23", sel="#22304a",
             hover="#272c37", ok="#5fd093", okbg="#173524", warn="#f0b45a", warnbg="#3a2c12", no="#f58a80",
             nobg="#402019", off="#6b7483", disabled="#565d6a", intro="#a78bfa", song="#45c4a8", track="#3a414d",
-            knob="#aab2c0")
+            knob="#aab2c0",
+            g1="#1f3a68", g2="#2f6fd0", g3="#2aa98c", spark="#f2c14e", t1="#7aa8ee", t2="#45c4a8",
+            btn1="#4a80d4", btn2="#3d93c9", glow=0.9)
 
 colors = dict(LIGHT)  # the colours in use (changed in place by apply_theme)
+DISPLAY = "Fraunces"  # the headings' typeface (fraunces.py); without it Qt takes the system's
+motion = True  # the small animations; set_motion() changes it (`motion` in config.json)
 
 
 def _url(name):
@@ -48,9 +61,9 @@ QFrame#field QDateEdit, QFrame#field QComboBox {{ border: none; background: tran
     font-weight: 600; }}
 QScrollArea, QWidget#scrollbody {{ background: transparent; border: none; }}
 QLabel {{ background: transparent; }}
-QLabel#title {{ font-size: 17px; font-weight: 600; }}
-QLabel#appname {{ font-size: 15px; font-weight: 700; }}
-QLabel#pagetitle {{ font-size: 22px; font-weight: 700; }}
+QLabel#title {{ font-family: "{DISPLAY}"; font-size: 20px; font-weight: 600; }}
+QLabel#appname {{ font-family: "{DISPLAY}"; font-size: 17px; font-weight: 600; }}
+QLabel#pagetitle {{ font-family: "{DISPLAY}"; font-size: 27px; font-weight: 600; }}
 QLabel#big {{ font-size: 15px; font-weight: 600; }}
 QLabel#caps {{ font-size: 11px; font-weight: 700; color: {c['sub']}; }}
 QLabel#small {{ font-size: 12px; color: {c['sub']}; }}
@@ -58,7 +71,7 @@ QLabel#pill {{ font-weight: 600; border-radius: 11px; padding: 3px 10px; }}
 QLabel#pill[kind="ok"] {{ background: {c['okbg']}; color: {c['ok']}; }}
 QLabel#pill[kind="warn"] {{ background: {c['warnbg']}; color: {c['warn']}; }}
 QLabel#pill[kind="no"] {{ background: {c['nobg']}; color: {c['no']}; }}
-QLabel#heading {{ font-size: 16px; font-weight: 600; }}
+QLabel#heading {{ font-family: "{DISPLAY}"; font-size: 19px; font-weight: 600; }}
 QLabel#sub, QLabel#hint {{ color: {c['sub']}; }}
 QLabel#strong {{ font-weight: 600; }}
 QLabel#error {{ color: {c['no']}; }}
@@ -66,14 +79,15 @@ QLabel#warntext {{ color: {c['warn']}; }}
 QFrame#drop {{ background: {c['soft']}; border: 2px dashed {c['softline']}; border-radius: 12px; }}
 QFrame#drop[has="true"] {{ background: {c['card']}; border: 1px solid {c['line']}; }}
 QFrame#drop[over="true"] {{ border: 2px solid {c['accent']}; }}
-QLabel#dropbig {{ font-size: 18px; font-weight: 600; color: {c['accent']}; }}
+QLabel#dropbig {{ font-family: "{DISPLAY}"; font-size: 21px; font-weight: 600; color: {c['accent']}; }}
 QPushButton {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 8px; padding: 7px 16px; }}
 QPushButton:hover {{ background: {c['hover']}; }}
 QPushButton:pressed {{ background: {c['sel']}; }}
 QPushButton:focus {{ border-color: {c['softline']}; }}
 QPushButton:disabled {{ color: {c['disabled']}; }}
-QPushButton#primary {{ background: {c['accent']}; border: 1px solid {c['accent2']}; color: white; font-weight: 600; }}
-QPushButton#primary:hover {{ background: {c['accent2']}; }}
+QPushButton#primary {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c['btn1']}, stop:1 {c['btn2']});
+    border: 1px solid {c['btn1']}; color: white; font-weight: 600; }}
+QPushButton#primary:hover {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {c['btn2']}, stop:1 {c['btn1']}); }}
 QPushButton#primary:disabled {{ background: {c['line']}; border-color: {c['line']}; color: {c['disabled']}; }}
 QPushButton#mini {{ padding: 3px 9px; font-size: 12px; border-radius: 6px; }}
 QPushButton#ghost {{ border: none; background: transparent; color: {c['sub']}; }}
@@ -111,7 +125,8 @@ QRadioButton::indicator:checked {{ border: 5px solid {c['accent']}; width: 6px; 
 QPlainTextEdit {{ background: {c['log']}; border: 1px solid {c['line']}; border-radius: 8px; padding: 6px;
     selection-background-color: {c['accent']}; selection-color: white; }}
 QProgressBar {{ background: {c['line']}; border: none; border-radius: 3px; max-height: 6px; min-height: 6px; }}
-QProgressBar::chunk {{ background: {c['accent']}; border-radius: 3px; }}
+QProgressBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {c['g2']}, stop:1 {c['g3']});
+    border-radius: 3px; }}
 QTableWidget {{ background: {c['card']}; border: 1px solid {c['line']}; border-radius: 12px;
     selection-background-color: {c['sel']}; selection-color: {c['text']}; outline: 0; }}
 QTableWidget::item {{ padding: 4px 10px; border-bottom: 1px solid {c['line']}; }}
@@ -161,11 +176,26 @@ def apply_theme(app, theme="auto"):
     app.setStyleSheet(style_sheet(colors))
 
 
+def set_motion(on):
+    """Turn the small animations on or off (what is already on screen stops by itself)."""
+    global motion
+    motion = bool(on)
+
+
+def load_display_font():
+    """Give Qt the headings' typeface. Without it (a broken install) the headings are in the system's."""
+    if DISPLAY in QFontDatabase.families():
+        return
+    import fraunces
+    QFontDatabase.addApplicationFontFromData(QByteArray(fraunces.TTF))
+
+
 def start_app(argv, theme="auto"):
     """The QApplication, with the Fusion style (the same on every system), the icon and the theme."""
     app = QApplication.instance() or QApplication(argv)
     app.setApplicationName(paths.APP_NAME)
     app.setStyle("Fusion")
+    load_display_font()
     for name in ("icon.ico", "icon-256.png"):
         if os.path.isfile(paths.asset(name)):
             app.setWindowIcon(QIcon(paths.asset(name)))
@@ -182,7 +212,7 @@ def fixed_font(size=9):
 
 def label(text="", kind="", wrap=False):
     """A QLabel; kind is its style: title, pagetitle, heading, big, caps, sub, small, hint, strong or error."""
-    lab = QLabel(text)
+    lab = Title(text) if kind == "pagetitle" else QLabel(text)
     if kind:
         lab.setObjectName(kind)
     if kind == "caps":
@@ -221,6 +251,313 @@ def field(text, widget):
     row.addWidget(label(text, "sub"))
     row.addWidget(widget)
     return box
+
+
+# ---- gradients, glows and what moves --------------------------------------------------------
+def mix(a, b, t):
+    """The colour a part t (0 to 1) of the way from a to b."""
+    a, b = QColor(a), QColor(b)
+    return QColor(round(a.red() + (b.red() - a.red()) * t), round(a.green() + (b.green() - a.green()) * t),
+                  round(a.blue() + (b.blue() - a.blue()) * t))
+
+
+def gradient(x1, x2, *names):
+    """A left-to-right gradient from x1 to x2 through the named colours of the theme."""
+    g = QLinearGradient(x1, 0, x2, 0)
+    for i, name in enumerate(names):
+        g.setColorAt(i / (len(names) - 1), QColor(colors[name]))
+    return g
+
+
+def glide(owner, change, ms=180):
+    """An animation from 0 to 1 that calls change(value); start it with .setDirection() and .start()."""
+    anim = QVariantAnimation(owner)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setDuration(ms)
+    anim.setEasingCurve(QEasingCurve.OutCubic)
+    anim.valueChanged.connect(change)
+    return anim
+
+
+class Moving(QWidget):
+    """A widget with a clock: tick(seconds) is called 25 times a second while the widget is shown,
+    wanted() is true and the animations are on. Hidden (the window is minimised), nothing runs."""
+
+    def __init__(self):
+        super().__init__()
+        self._clock = QTimer(self)
+        self._clock.setInterval(40)
+        self._clock.timeout.connect(self._step)
+        self._since = QElapsedTimer()
+
+    moving = property(lambda self: self._clock.isActive())
+
+    def wanted(self):
+        return True
+
+    def wake(self):
+        """Start or stop the clock, after something changed."""
+        if motion and self.isVisible() and self.wanted():
+            if not self._clock.isActive():
+                self._since.start()
+                self._clock.start()
+        elif self._clock.isActive():
+            self._clock.stop()
+            self.update()
+
+    def showEvent(self, _event):  # noqa: N802
+        self.wake()
+
+    def hideEvent(self, _event):  # noqa: N802
+        self._clock.stop()
+
+    def _step(self):
+        if not (motion and self.wanted()):
+            self._clock.stop()
+        else:
+            self.tick(self._since.elapsed() / 1000)
+        self.update()
+
+    def tick(self, seconds):
+        pass
+
+
+class Title(QLabel):
+    """A page's title in the gradient of the website's headline. A band of gold light crosses it once
+    each time the page is shown."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.shine = 2.0  # where the band is, 0 (left) to 1 (right); outside that there is none
+        self.sweep = glide(self, self._move, 1100)
+        self.sweep.setEasingCurve(QEasingCurve.InOutSine)
+
+    def _move(self, t):
+        self.shine = -0.2 + 1.4 * t
+        self.update()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if motion:
+            self.sweep.stop()
+            self.sweep.start()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        p.setFont(self.font())
+        width = max(1, self.fontMetrics().horizontalAdvance(self.text()))
+        left = self.contentsRect().left()
+        g = QLinearGradient(left, 0, left + width, 0)
+        g.setColorAt(0, QColor(colors["t1"]))
+        g.setColorAt(1, QColor(colors["t2"]))
+        for offset, light in ((-0.1, 0), (0, 0.9), (0.1, 0)):
+            at = self.shine + offset
+            if 0 < at < 1:
+                g.setColorAt(at, mix(mix(colors["t1"], colors["t2"], at), colors["spark"], light))
+        p.setPen(QPen(QBrush(g), 1))
+        p.drawText(self.contentsRect(), Qt.AlignLeft | Qt.AlignVCenter, self.text())
+        p.end()
+
+
+class _Glow(QObject):
+    """The glow under a main button: it grows while the pointer is on the button, and is gone while
+    the button cannot be pressed."""
+
+    def __init__(self, button):
+        super().__init__(button)
+        self.button = button
+        self.effect = QGraphicsDropShadowEffect(button)
+        self.effect.setOffset(0, 4)
+        button.setGraphicsEffect(self.effect)
+        self.rise = glide(self, self._lift)
+        self._lift(0.0)
+        self.effect.setEnabled(button.isEnabled())
+        button.installEventFilter(self)
+
+    def _lift(self, t):
+        color = QColor(colors["g2"])
+        color.setAlpha(round((0.42 + 0.3 * t) * colors["glow"] * 255))
+        self.effect.setColor(color)
+        self.effect.setBlurRadius(16 + 12 * t)
+
+    def eventFilter(self, _obj, event):  # noqa: N802
+        kind = event.type()
+        if kind == QEvent.EnabledChange:
+            self.effect.setEnabled(self.button.isEnabled())
+        elif kind in (QEvent.Enter, QEvent.Leave) and motion and self.button.isEnabled():
+            self.rise.setDirection(QVariantAnimation.Forward if kind == QEvent.Enter else QVariantAnimation.Backward)
+            self.rise.start()
+        return False
+
+
+def primary(button):
+    """Make `button` the main button of its page or window: the gradient (in the style sheet) and a
+    glow under it."""
+    button.setObjectName("primary")
+    _Glow(button)
+    return button
+
+
+_strips = {}
+
+
+def _glow_strip(width):
+    """A soft band of the gradient, `width` wide when drawn: painted small and drawn large, which blurs it."""
+    key = (max(8, width // 10), colors["g2"], colors["g3"])
+    if key not in _strips:
+        if len(_strips) > 40:
+            _strips.clear()
+        w, h = key[0], 10
+        image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.transparent)
+        p = QPainter(image)
+        p.fillRect(0, 0, w, h, gradient(0, w, "g2", "g3"))
+        p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+        down = QLinearGradient(0, 0, 0, h)  # strongest in the middle, nothing at the top and bottom
+        for at, alpha in ((0, 0), (0.5, 255), (1, 0)):
+            down.setColorAt(at, QColor(0, 0, 0, alpha))
+        p.fillRect(0, 0, w, h, down)
+        across = QLinearGradient(0, 0, w, 0)  # and nothing at the two ends
+        for at, alpha in ((0, 0), (0.18, 255), (0.82, 255), (1, 0)):
+            across.setColorAt(at, QColor(0, 0, 0, alpha))
+        p.fillRect(0, 0, w, h, across)
+        p.end()
+        _strips[key] = image
+    return _strips[key]
+
+
+class Underglow(Moving):
+    """Holds one widget (a card) and lets the gradient glow under its lower edge, as under the website's
+    buttons and screenshot. The glow breathes slowly. It is shown and hidden with its widget."""
+    ROOM, INSET = 14, 26
+
+    def __init__(self, child):
+        super().__init__()
+        box = QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, self.ROOM)
+        box.addWidget(child)
+        self.child, self.level = child, 0.8
+        child.installEventFilter(self)
+        self.setVisible(not child.isHidden())
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self.child and event.type() in (QEvent.ShowToParent, QEvent.HideToParent):
+            self.setVisible(event.type() == QEvent.ShowToParent)
+        return False
+
+    def tick(self, seconds):
+        self.level = 0.72 + 0.28 * math.sin(seconds * 2 * math.pi / 5)
+
+    def paintEvent(self, _event):  # noqa: N802
+        width = self.width() - 2 * self.INSET
+        if width < 40:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.setOpacity(self.level * colors["glow"])
+        p.drawImage(QRectF(self.INSET, self.height() - 2 * self.ROOM - 2, width, 2 * self.ROOM + 2), _glow_strip(width))
+        p.end()
+
+
+class Beam(Moving):
+    """The gradient line along the top of the window. While a broadcast is being made (set_busy), a
+    band of gold light runs along it."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(3)
+        self.busy, self.at, self.lap = False, -1.0, 0
+
+    def set_busy(self, on):
+        self.busy = on
+        self.wake()
+
+    def wanted(self):
+        return self.busy or self.at >= 0
+
+    def tick(self, seconds):
+        lap, part = divmod(seconds / 1.8, 1)
+        if not self.busy and (self.at < 0 or lap != self.lap):  # the work is done: this run was the last
+            self.at = -1.0
+            return
+        self.at, self.lap = part, lap
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        w = self.width()
+        p.fillRect(self.rect(), gradient(0, w, "g1", "g2", "g3"))
+        if self.moving and self.at >= 0:
+            mid = (-0.15 + 1.3 * self.at) * w
+            light = QLinearGradient(mid - 0.12 * w, 0, mid + 0.12 * w, 0)
+            spark = QColor(colors["spark"])
+            for at, alpha in ((0, 0), (0.5, 255), (1, 0)):
+                spark.setAlpha(alpha)
+                light.setColorAt(at, spark)
+            p.fillRect(self.rect(), light)
+        p.end()
+
+
+class Curtain(QWidget):
+    """Laid over the pages when another page is chosen, in the window's colour, and faded away at once:
+    the new page seems to fade in. Nothing is put on the pages themselves."""
+
+    def __init__(self, over):
+        super().__init__(over)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.alpha = 0.0
+        self.fade = glide(self, self._set, 220)
+        self.fade.finished.connect(self.hide)
+        self.hide()
+
+    def _set(self, t):
+        self.alpha = 1 - t
+        self.update()
+
+    def drop(self):
+        over = self.parentWidget()
+        if not (motion and over.isVisible()):
+            return
+        self.setGeometry(over.rect())
+        self.alpha = 1.0
+        self.raise_()
+        self.show()
+        self.fade.stop()
+        self.fade.start()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        color = QColor(colors["bg"])
+        color.setAlphaF(self.alpha)
+        p.fillRect(self.rect(), color)
+        p.end()
+
+
+class Side(QFrame):
+    """The menu's column at the left: its colour, with the gradient's blue glowing softly from the
+    corner behind the app's name and a little green from the bottom."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("side")
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(colors["side"]))
+        for name, center, radius, strength in (("g2", QPointF(20, 10), 300, 0.26),
+                                               ("g3", QPointF(self.width() * 0.2, self.height() + 40), 260, 0.16)):
+            color = QColor(colors[name])
+            glow = QRadialGradient(center, radius)
+            color.setAlphaF(strength * colors["glow"])
+            glow.setColorAt(0, color)
+            color.setAlphaF(0)
+            glow.setColorAt(1, color)
+            p.fillRect(self.rect(), glow)
+        p.setPen(QColor(colors["line"]))
+        p.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
+        p.end()
 
 
 # ---- small drawings: no picture files, and they take the colours of the theme ---------------
@@ -292,7 +629,8 @@ class IconTile(QWidget):
 
 
 class NavButton(QAbstractButton):
-    """A line of the menu at the left: an icon and a name. The page shown is the checked one."""
+    """A line of the menu at the left: an icon and a name. The page shown is the checked one; it has a
+    short line of the gradient at its left that grows when it is chosen."""
 
     def __init__(self, icon, text):
         super().__init__()
@@ -303,6 +641,21 @@ class NavButton(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.on = 0.0  # how far it is chosen, 0 to 1
+        self.slide = glide(self, self._set, 220)
+        self.toggled.connect(self._choose)
+
+    def _set(self, t):
+        self.on = t
+        self.update()
+
+    def _choose(self, checked):
+        if motion and self.isVisible():
+            self.slide.setDirection(QVariantAnimation.Forward if checked else QVariantAnimation.Backward)
+            self.slide.start()
+        else:
+            self.slide.stop()
+            self._set(1.0 if checked else 0.0)
 
     def sizeHint(self):  # noqa: N802
         return QSize(180, 40)
@@ -316,11 +669,22 @@ class NavButton(QAbstractButton):
     def paintEvent(self, _event):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        on = self.isChecked()
-        if on or (self.underMouse() and self.isEnabled()):
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(colors["card" if on else "hover"]))
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(0, 1, 0, -1), 9, 9)
+        on, r = self.isChecked(), QRectF(self.rect()).adjusted(0, 1, 0, -1)
+        p.setPen(Qt.NoPen)
+        if self.underMouse() and self.isEnabled() and not on:
+            p.setBrush(QColor(colors["hover"]))
+            p.drawRoundedRect(r, 9, 9)
+        if self.on > 0:
+            p.setOpacity(self.on)
+            p.setBrush(QColor(colors["card"]))
+            p.drawRoundedRect(r, 9, 9)
+            p.setOpacity(1)
+            tall = 18 * self.on
+            line = QLinearGradient(0, r.center().y() - 9, 0, r.center().y() + 9)
+            line.setColorAt(0, QColor(colors["g2"]))
+            line.setColorAt(1, QColor(colors["g3"]))
+            p.setBrush(line)
+            p.drawRoundedRect(QRectF(0, r.center().y() - tall / 2, 3, tall), 1.5, 1.5)
         color = colors["disabled"] if not self.isEnabled() else colors["text" if on else "sub"]
         draw_icon(p, self.icon_name, QRectF(12, (self.height() - 18) / 2, 18, 18), color)
         font = QFont(self.font())
@@ -363,17 +727,29 @@ class Segments(QFrame):
 
 
 class HourBar(QWidget):
-    """The broadcast as one bar: the intro, the service and each song, to scale."""
+    """The broadcast as one bar: the intro, the service and each song, to scale. When a new hour is
+    shown, the bar fills once from the left behind a gold needle, as on the website."""
     COLORS = {"intro": "intro", "service": "accent", "song": "song"}
 
     def __init__(self):
         super().__init__()
-        self.parts = []
+        self.parts, self.filled = [], 1.0
         self.setFixedHeight(40)
+        self.fill = glide(self, self._fill, 1300)
+
+    def _fill(self, t):
+        self.filled = t
+        self.update()
 
     def set_parts(self, parts):
         """parts: [(kind, seconds, text drawn in the part if it fits)], kind: intro, service or song."""
-        self.parts = [p for p in parts if p[1] > 0]
+        parts = [p for p in parts if p[1] > 0]
+        new = parts != self.parts
+        self.parts = parts
+        self.fill.stop()
+        self.filled = 1.0
+        if new and parts and motion and self.isVisible():
+            self.fill.start()
         self.update()
 
     def paintEvent(self, _event):  # noqa: N802
@@ -384,9 +760,11 @@ class HourBar(QWidget):
         clip.addRoundedRect(rect, 9, 9)
         p.setClipPath(clip)
         total = sum(sec for _kind, sec, _text in self.parts)
+        p.fillRect(rect, QColor(colors["line"]))
         if not total:
-            p.fillRect(rect, QColor(colors["line"]))
             return
+        edge = rect.width() * self.filled
+        p.setClipRect(QRectF(0, 0, edge, rect.height()), Qt.IntersectClip)
         p.fillRect(rect, QColor(colors["card"]))  # shows as the thin gaps between the parts
         font = QFont(self.font())
         font.setBold(True)
@@ -401,6 +779,12 @@ class HourBar(QWidget):
                 p.setPen(QColor("white"))
                 p.drawText(part.adjusted(14, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
             x += w + gap
+        if self.filled < 1:  # the needle, with its light
+            p.setClipPath(clip)
+            spark = QColor(colors["spark"])
+            for wide, alpha in ((14, 40), (8, 70), (3, 255)):
+                spark.setAlpha(alpha)
+                p.fillRect(QRectF(edge - wide / 2, 0, wide, rect.height()), spark)
 
 
 def clock(sec):
@@ -880,7 +1264,13 @@ class SwitchDelegate(QStyledItemDelegate):
         w, h = 40.0, 22.0
         rect = QRectF(option.rect.x() + 16, option.rect.center().y() - h / 2 + 1, w, h)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(colors["accent" if on else "track"]))
+        if on:
+            track = QLinearGradient(rect.left(), 0, rect.right(), 0)
+            track.setColorAt(0, QColor(colors["btn1"]))
+            track.setColorAt(1, QColor(colors["btn2"]))
+            painter.setBrush(track)
+        else:
+            painter.setBrush(QColor(colors["track"]))
         painter.drawRoundedRect(rect, h / 2, h / 2)
         painter.setBrush(QColor("white" if on else colors["knob"]))
         r = h / 2 - 3

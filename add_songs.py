@@ -168,7 +168,7 @@ class SongReview(QDialog):
         cancel.clicked.connect(self.reject)
         bottom.addWidget(cancel)
         self.save_btn = QPushButton("Add" if mode == "add" else "Save")
-        self.save_btn.setObjectName("primary")
+        ui.primary(self.save_btn)
         self.save_btn.setAutoDefault(False)
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self.save)

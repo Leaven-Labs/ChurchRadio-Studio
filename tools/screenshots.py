@@ -114,6 +114,8 @@ def main():
     mp3 = example_data()
     paths.version = lambda: "1.5.1"  # (from the source code it says "development")
     app = ui.start_app(["screenshots"], "light")
+    ui.set_motion(False)  # still pictures: nothing is caught half-way through an animation
+    ui.set_motion = lambda on: None  # (the window would switch them on again from the settings)
     for theme in ("light", "dark"):  # every picture twice: name.png and name-dark.png
         cfg = builder.load_config()
         cfg["theme"] = theme  # (so the Settings page shows it too)

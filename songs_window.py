@@ -142,7 +142,7 @@ def ask_seasons(parent, name, current, on_ok):
         lay.addWidget(tick[tag])
     lay.addWidget(ui.label("None ticked = General: may play any time of the year.", "hint"))
     ok, cancel = QPushButton("OK"), QPushButton("Cancel")
-    ok.setObjectName("primary")
+    ui.primary(ok)
     ok.setDefault(True)
     ok.clicked.connect(dlg.accept)
     cancel.clicked.connect(dlg.reject)
@@ -187,7 +187,7 @@ def ask_identify(parent, rows, selected, on_ok):
     lay.addWidget(ui.label("Listening takes a few seconds per song: a bulk scan of many songs can take a "
                            "while. Cancel in the next window keeps nothing.", "hint", wrap=True))
     start, cancel = QPushButton("Start"), QPushButton("Cancel")
-    start.setObjectName("primary")
+    ui.primary(start)
     start.setDefault(True)
     start.clicked.connect(dlg.accept)
     cancel.clicked.connect(dlg.reject)
@@ -226,7 +226,7 @@ class SongsPage(QWidget):
         self.pd_btn = QPushButton("Check public domain")
         self.pd_btn.clicked.connect(self.public_domain)
         add = QPushButton("Add songs")
-        add.setObjectName("primary")
+        ui.primary(add)
         add.clicked.connect(self.add_songs)
         for b in (self.import_btn, self.find_btn, self.pd_btn, add):
             b.setAutoDefault(False)
@@ -580,7 +580,7 @@ class SongsPage(QWidget):
                 dlg.accept()
 
         tpl, imp, close = QPushButton("Download template..."), QPushButton("Import a file..."), QPushButton("Close")
-        imp.setObjectName("primary")
+        ui.primary(imp)
         tpl.clicked.connect(template)
         imp.clicked.connect(pick)
         close.clicked.connect(dlg.reject)

@@ -459,6 +459,7 @@ editor for the rest (close the app first).
 | `output_folder` | (none) | Where to save the MP3. Empty = next to the recording. |
 | `theme` | `auto` | The app's look: `auto` (as your computer is set), `light` or `dark`. |
 | `check_updates` | `true` | Look for a new version when the app starts. See [Updating](#updating). |
+| `motion` | `true` | The small animations of the window (a page fades in, the hour fills, a light runs along the top while a broadcast is made). `false` gives a still window. |
 | `target_minutes` | `60` | Broadcast length. |
 | `tolerance_seconds` | `30` | The songs never make it more than this much longer. |
 | `service_start` | `Auto` | `Auto`, `Organ start` or `Keep start`. |

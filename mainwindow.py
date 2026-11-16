@@ -100,7 +100,8 @@ def about(parent):
         icon.setPixmap(pix.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         lay.addWidget(icon, 0, Qt.AlignCenter)
     for text, kind in ((paths.APP_NAME, "title"), (f"Version {paths.version()}", "sub"), ("", ""), (CREDIT, ""),
-                       ("Free software under the MIT License.\nCopyright (c) 2026 Aaron Steger", "")):
+                       ("Free software under the MIT License.\nCopyright (c) 2026 Aaron Steger", ""),
+                       ("The headings are set in Fraunces (SIL Open Font License).", "small")):
         lab = ui.label(text, kind)
         lab.setAlignment(Qt.AlignCenter)
         lay.addWidget(lab)
@@ -157,7 +158,7 @@ class DropArea(QFrame):
         small = ui.label("MKV, MP4, WAV, MP3 or M4A", "sub")
         small.setAlignment(Qt.AlignCenter)
         self.browse = QPushButton("Browse...")
-        self.browse.setObjectName("primary")
+        ui.primary(self.browse)
         self.browse.setFixedWidth(130)
         self.browse.clicked.connect(on_browse)
         col.addWidget(big)
@@ -226,7 +227,7 @@ class ResultCard(QFrame):
             col.addWidget(lab)
         row.addLayout(col, 1)
         self.play_btn, self.folder_btn = QPushButton("Play"), QPushButton("Show in folder")
-        self.play_btn.setObjectName("primary")
+        ui.primary(self.play_btn)
         self.play_btn.clicked.connect(lambda: self.open(False))
         self.folder_btn.clicked.connect(lambda: self.open(True))
         row.addWidget(self.play_btn, 0, Qt.AlignTop)
@@ -279,7 +280,7 @@ class UpdateBanner(QFrame):
         self.update_btn, self.page_btn = QPushButton("Update now"), QPushButton("Open the download page")
         self.new_btn, self.later_btn = QPushButton("What's new"), QPushButton("Later")
         self.cancel_btn = QPushButton("Cancel")
-        self.update_btn.setObjectName("primary")
+        ui.primary(self.update_btn)
         self.update_btn.clicked.connect(on_update)
         self.page_btn.clicked.connect(self.open_page)
         self.new_btn.clicked.connect(lambda: self.notes.setVisible(self.notes.isHidden()))
@@ -467,12 +468,19 @@ class MainWindow(QWidget):
         self.setAcceptDrops(True)
         self.resize(1180, 860)
         self.setMinimumSize(980, 700)
-        lay = QHBoxLayout(self)
+        whole = QVBoxLayout(self)
+        whole.setContentsMargins(0, 0, 0, 0)
+        whole.setSpacing(0)
+        self.beam = ui.Beam()  # the gradient line along the top; a light runs along it during a build
+        whole.addWidget(self.beam)
+        lay = QHBoxLayout()
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
+        whole.addLayout(lay, 1)
         lay.addWidget(self.make_side())
         self.pages = QStackedWidget()
         lay.addWidget(self.pages, 1)
+        self.curtain = ui.Curtain(self.pages)  # a page that is chosen fades in
 
         try:
             cfg = builder.load_config()
@@ -501,8 +509,7 @@ class MainWindow(QWidget):
     # ---- the parts of the window --------------------------------------------------------
     def make_side(self):
         """The menu at the left: the app and broadcast names, the pages, the version and season."""
-        side = QFrame()
-        side.setObjectName("side")
+        side = ui.Side()
         side.setFixedWidth(224)
         col = QVBoxLayout(side)
         col.setContentsMargins(14, 22, 14, 16)
@@ -597,8 +604,8 @@ class MainWindow(QWidget):
         self.start_hint = ui.label("", "hint", wrap=True)
         self.start_hint.setContentsMargins(4, 0, 4, 0)
         lay.addWidget(self.start_hint)
-        self.result = ResultCard()  # shown when the broadcast is made
-        lay.addWidget(self.result)
+        self.result = ResultCard()  # shown when the broadcast is made, with a glow under it
+        lay.addWidget(ui.Underglow(self.result))
 
         self.wave_card = ui.card()  # shown once there is a recording
         col = QVBoxLayout(self.wave_card)
@@ -662,7 +669,7 @@ class MainWindow(QWidget):
         row.setSpacing(6)
         self.nudges, self.cut_times, self.cut_labels = [], {}, []
         self.make_btn = QPushButton("Make the broadcast")
-        self.make_btn.setObjectName("primary")
+        ui.primary(self.make_btn)
         self.make_btn.clicked.connect(self.make)
         for which in ("start", "end"):
             lab = ui.label("Start" if which == "start" else "End", "small")
@@ -793,7 +800,11 @@ class MainWindow(QWidget):
             if models:
                 self.settings_form.show_models()
         self.nav[key].setChecked(True)
-        self.pages.setCurrentIndex([k for k, _text in PAGES].index(key))
+        index = [k for k, _text in PAGES].index(key)
+        other = index != self.pages.currentIndex()
+        self.pages.setCurrentIndex(index)
+        if other:
+            self.curtain.drop()
         self.show_space()
 
     def show_season(self):
@@ -806,6 +817,7 @@ class MainWindow(QWidget):
         except (OSError, ValueError):
             cfg = {}
         ui.apply_theme(ui.QApplication.instance(), cfg.get("theme", "auto"))
+        ui.set_motion(cfg.get("motion", True))
         name = (cfg.get("broadcast_name") or "").strip()
         self.setWindowTitle(f"{paths.APP_NAME} - {name}" if name else paths.APP_NAME)
         self.name_label.setText(name)
@@ -921,6 +933,7 @@ class MainWindow(QWidget):
 
     def set_busy(self, busy):
         self.busy = busy
+        self.beam.set_busy(busy)
         for w in (self.nav["songs"], self.nav["settings"], self.drop.browse, self.choose_btn):
             w.setEnabled(not busy)
         self.bar.setRange(0, 0 if busy else 1)  # 0..0: a moving bar, there is no known end
@@ -1528,9 +1541,16 @@ def uitest():
         window.update_banner.offer(updates.release_info({"tag_name": "v9.9.9", "body": "## What's new\n- **More.**"}),
                                    theme == "dark")
         window.result.show_result("Church Radio 2026-11-15.mp3", 3600.0, "Too long." if theme == "dark" else None)
-        window.set_busy(True)  # (the Cancel button)
+        window.set_busy(True)  # (the Cancel button, and the light along the top line)
         drawn(window, "making")
+        for _ in range(6):  # what moves: let the clocks and animations run for a moment
+            time.sleep(0.03)
+            drawn(window, "moving")
+        made[:] = [m for m in made if not m.startswith("moving")]
         window.set_busy(False)
+        ui.set_motion(False)
+        drawn(window, "still")
+        ui.set_motion(True)
         for key, _text in PAGES:
             window.show_page(key, models=False)  # (looking for the models makes the models folder)
             if window.pages.currentIndex() != [k for k, _t in PAGES].index(key):

@@ -106,6 +106,10 @@ def main(out_path):
                                                                          + license_name(d) + ")"]
     for title, text in python_license():
         lines += ["", "=" * 78, title, "=" * 78, text.strip()]
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import fraunces  # the headings' typeface, carried in the program as text
+    lines += ["", "=" * 78, "Fraunces (the typeface of the headings)  --  SIL Open Font License 1.1",
+              "https://github.com/undercasetype/Fraunces", "=" * 78, fraunces.LICENSE.strip()]
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

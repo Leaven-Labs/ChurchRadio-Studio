@@ -10,9 +10,13 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.5.1
+## What's new in 1.5.2
 
-- **A new icon.** The app is now a radio set with a cross for its dial, in the window, the taskbar and your applications menu. Nothing else about the app has changed.
-- **Leaven Labs has a home page:** [www.leavenlabs.org](https://www.leavenlabs.org). The installer and the README point there now.
+- **The look of the website, in the app.** Its gradient of navy, blue and green, with gold for a spark, is on a line along the top of the window, the main buttons, the switches of the Songs page, the progress bar and the page titles, and the headings are in the website's typeface. Where things are and what they do has not changed.
+- **A soft glow** under the main buttons and under the card of the finished broadcast.
+- **Small animations.** A page fades in and a band of gold light crosses its title; the menu's marker slides; The hour fills once behind a gold needle; and a light runs along the top line while a broadcast is being made.
+- **Settings → Small animations** switches them off for a still window (`motion` in config.json). Nothing moves while the window is not shown.
+
+The new look passed the automated tests but has not yet been seen on a real Windows PC or Mac. Please report anything that looks wrong or feels slow.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

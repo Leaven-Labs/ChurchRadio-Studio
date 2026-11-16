@@ -73,7 +73,7 @@ class SettingsForm(QWidget):
         self.next_btn = QPushButton("Next >")
         self.next_btn.clicked.connect(lambda: self.go(self.page + 1))
         self.finish_btn = QPushButton("Save")
-        self.finish_btn.setObjectName("primary")
+        ui.primary(self.finish_btn)
         self.finish_btn.clicked.connect(self.finish)
         for b in (cancel, self.back_btn, self.next_btn, self.finish_btn):
             b.setAutoDefault(False)
@@ -104,7 +104,7 @@ class SettingsForm(QWidget):
         top.addWidget(self.saved_label)
         top.addStretch()
         self.finish_btn = QPushButton("Save")
-        self.finish_btn.setObjectName("primary")
+        ui.primary(self.finish_btn)
         self.finish_btn.setAutoDefault(False)
         self.finish_btn.clicked.connect(self.finish)
         top.addWidget(self.finish_btn)
@@ -171,7 +171,7 @@ class SettingsForm(QWidget):
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
                  date_format=self.date_format.currentData() or builder.DATE_FORMAT,
                  output_folder=self.output.text().strip(), intro=intro,
-                 theme=ui.THEMES[self.theme.currentIndex()],
+                 theme=ui.THEMES[self.theme.currentIndex()], motion=self.motion.isChecked(),
                  song_folders=list(self.folders),
                  start_phrase=self.start_phrase.text().strip(),
                  service_start=self.service_start.currentText(),
@@ -280,6 +280,11 @@ class SettingsForm(QWidget):
         theme = c.get("theme", "auto")
         self.theme.setCurrentIndex(ui.THEMES.index(theme) if theme in ui.THEMES else 0)
         self.row("The app's look:", self.theme, "light or dark", width=200)
+        self.motion = QCheckBox("Small animations (a page fades in, the hour fills, a light runs while a "
+                                "broadcast is made)")
+        self.motion.setChecked(bool(c.get("motion", True)))
+        self.motion.setToolTip("Switch off for a still window.")
+        self.body.addWidget(self.motion)
         self.check_updates = QCheckBox("Look for a new version when the app starts")
         self.check_updates.setChecked(bool(c.get("check_updates", True)))
         self.check_updates.setToolTip("Asks github.com for the newest version's number. Nothing about your "

@@ -27,7 +27,11 @@ ready-to-air MP3:
 - **Fills the time** to your broadcast length (never more than 30 seconds over) with your own songs
   that **fit the church year**, plus patriotic songs on national holiday weekends. Songs used in
   recent weeks go last.
-- **Evens out the sound** with a broadcast compressor and limiter.
+- **Evens out the sound**: the intro, the service and each song are made equally loud, the whole
+  MP3 is brought to the level you choose (−16 LUFS unless you change it), and a broadcast
+  compressor and limiter even out the rest.
+- **Saves a cue sheet** next to the MP3: what plays when, with each song's title and whether it may be
+  broadcast, for your station and for license reports.
 
 The app is **light or dark**, as your computer is set (or as you choose in Settings):
 
@@ -98,7 +102,7 @@ page.
 1. **Welcome.**
 2. **Broadcast**: your program's name (used in the file name, e.g. `St. John Radio 2026-11-15.mp3`),
    how the [date is written](#the-date-in-the-file-name), the broadcast length, how far over it may
-   run, and where to save the MP3 (empty = next to the recording).
+   run, [how loud](#loudness) the MP3 is, and where to save the MP3 (empty = next to the recording).
 3. **Intro**: the intro that plays first, or none.
 4. **Songs**: the folders that hold your songs (folders inside them are included).
 5. **Service words**: the opening words, the pastor's last words and the congregation's answer, as
@@ -114,8 +118,8 @@ page.
 3. Watch **Progress**. It takes a few minutes: about 30 seconds to find the start, 1 to 3 minutes to
    find the end, then joining and compressing. **The hour** shows the intro, the service and the
    chosen songs to scale. **Show the details** shows everything the app wrote while it worked.
-4. When it is done, a card shows the MP3 with its length and folder: **Play** it, or **Show in
-   folder**.
+4. When it is done, a card shows the MP3 with its length and folder: **Play** it, open its
+   [**Cue sheet**](#the-cue-sheet), or **Show in folder**.
 
 **Cancel**, next to the progress bar, stops a broadcast that is being made. Nothing is saved, and a
 broadcast made before is left as it was. Cuts that were already found are kept.
@@ -170,6 +174,23 @@ dim parts before and after are cut off.
 
 To check every week before the MP3 is written, tick **Check the cuts before the MP3 is written**: the
 app finds the cuts and waits for you to click **Make the broadcast**. Scheduled runs never wait.
+
+### The cue sheet
+
+Next to each MP3 the app saves a cue sheet, `St. John Radio 2026-11-15 cue sheet.csv`, that opens in
+Excel or any spreadsheet. It has one line for the intro, the service and each song:
+
+| Starts at | Ends at | Length | Part | Title | File | May broadcast | Permission | Note |
+|---|---|---|---|---|---|---|---|---|
+| 0:00:00 | 0:00:30 | 0:00:30 | Intro | Intro | Intro.mp3 | | | |
+| 0:00:30 | 0:48:12 | 0:47:42 | Service | The service | Service 2026-11-15.mkv | | | |
+| 0:48:12 | 0:52:01 | 0:03:49 | Song | Amazing Grace | Amazing Grace.mp3 | Public domain | | Published 1779. |
+| 0:52:01 | 0:55:47 | 0:03:46 | Song | In Christ Alone | In Christ Alone.mp3 | Allowed | CCLI Streaming License 123456 | |
+
+The times are where each part is heard in the MP3. **May broadcast**, **Permission** and **Note** come
+from the [Songs page](#public-domain) ("Not looked up" for a song that was not looked up). Give the
+station the sheet with the MP3, or keep the sheets for a license report such as CCLI's. To stop
+saving it, untick **Save a cue sheet next to the MP3** in Settings.
 
 ### History
 
@@ -431,6 +452,31 @@ hymns; newer songs are listed by title only.
 
 Most settings are on the **Settings** page; click **Save** when you have changed them.
 
+### Loudness
+
+**Loudness** (on the Broadcast part of the page) sets how loud the MP3 is. The app measures the
+intro, the service and each song, makes them equally loud, and brings the whole broadcast to the
+level chosen, so a quiet sermon and a loud CD play at the same level and your station gets the same
+level every week. The levels are in LUFS, the measure stations and podcast apps use:
+
+| Choice | LUFS | For |
+|---|---|---|
+| Loud, like music streaming | −14 | |
+| Podcasts and web radio (the usual) | −16 | most stations and the web |
+| A little quieter | −18 | |
+| Broadcast standard in Europe (EBU R128) | −23 | stations that ask for R128 |
+| Broadcast standard in the US (ATSC A/85) | −24 | stations that ask for A/85 |
+| Not evened out | | each part as it was recorded (as before 1.6.0) |
+
+If your station asks for a level, choose it; if not, keep the usual one. A part is never turned up
+by more than 12 dB, so a very quiet recording stays a little quieter rather than hissing. A song is
+measured the first time it is used and remembered (`loudness.json` in
+[your settings folder](#where-your-files-are)). The log lists each part's loudness and how much it
+was turned up or down. Evening out takes a little longer: the broadcast is read once more before
+the MP3 is written.
+
+### Service words
+
 Under **Service words**, two numbers set how much is kept after the words that end the service:
 **Seconds kept after them** (after the pastor's last words, used when the congregation's answer is
 not heard; 5 at first) and **Seconds kept after it** (after the answer; 0.5 at first). Give more
@@ -480,6 +526,8 @@ editor for the rest (close the app first).
 | `avoid_repeat_weeks` | `4` | Songs used in this many recent broadcasts go last. |
 | `patriotic_holidays` | `memorial`, `independence`, `veterans` | Weekends that get patriotic songs. `labor` is also possible. |
 | `mp3_bitrate` | `192k` | MP3 quality. |
+| `cue_sheet` | `true` | Save a [cue sheet](#the-cue-sheet) next to the MP3 (on the Settings page). |
+| `loudness_lufs` | `-16` | [Loudness](#loudness) of the MP3 (on the Settings page). `null` = not evened out. |
 | `compression` | 4:1 above -18 dB, +6 dB, limit -1 dB | `enabled`, `ratio`, `threshold_db`, `attack_ms` (20), `release_ms` (250), `makeup_db`, `limit_db`. |
 | `models_folder` | (none) | A folder that already holds the speech models. |
 | `setup_done` | `false` | Set to `false` to see the setup wizard again. |
@@ -494,8 +542,8 @@ a drive not plugged in), its songs stay in the list with your edits.
 
 ## Where your files are
 
-**Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`
-and the logs of scheduled runs (`logs`).
+**Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`,
+the songs' measured loudness (`loudness.json`) and the logs of scheduled runs (`logs`).
 
 | What | Windows | Mac | Linux |
 |---|---|---|---|

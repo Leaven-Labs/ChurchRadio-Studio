@@ -91,8 +91,23 @@ item. Remove it from this file once it is built.
      about 208 MB, down from 308 MB (Mac 119 MB). BtbN's `latest` was ffmpeg 8.x; the pin is
      7.1.1, as on the Mac (the tests pass on it). Moving all three to 8.x is a later, separate step. Then look at why the
      Linux download is still about 208 MB (Windows 92, Mac 119).
-  2. **Even loudness for the whole MP3**: ffmpeg `loudnorm` to a target set in Settings.
-  3. **A cue sheet next to the MP3**: what played, when, titles, permissions (for stations, CCLI).
+  2. **Even loudness for the whole MP3** (built November 2026). `loudness_lufs` in config.json (-16 unless
+     changed; null = off, as before), a list in plain words on the Broadcast part of Settings
+     (`setup_wizard.LOUDNESS_LEVELS`: -14, -16, -18, -23 EBU R128, -24 ATSC A/85; a level typed in
+     config.json is listed too). Not `loudnorm` (its dynamic mode pumps): each part is measured with
+     `ebur128` (`audio.loudness`) and brought to `audio.LOUDNESS_REFERENCE` (-20) by a plain gain, never
+     more than +12 / -24 dB (`level_gain`), so the compressor works on all parts alike; then the whole
+     is measured once (`audio.measure_joined`, no MP3 written) and `final_db` brings it to the target
+     before the limiter (`audio._graph`). The limiter stays when the compressor is off. Songs and the
+     intro are measured once and kept in `loudness.json` (key: path, size, time, trim); the service is
+     measured every time. The extra pass takes the first 30 % of the MP3 step's progress bar.
+  3. **A cue sheet next to the MP3** (built November 2026): `<MP3 name> cue sheet.csv` (utf-8-sig, for
+     Excel), one line for the intro, the service and each song: starts at, ends at, length (h:mm:ss in
+     the MP3), part, title, file, May broadcast (`catalog.broadcast_label`, shared with the Songs page;
+     "Not looked up" if empty), permission, note. `builder.cue_rows` / `write_cue_sheet`; written after
+     the MP3, a failure to write it only warns. `cue_sheet` in config.json (on unless turned off; a box
+     under "Save the MP3 in" in Settings). The result card has a "Cue sheet" button when the file is
+     there. Not done: a CCLI song-number column (the song list has none yet).
   4. **Cuts remembered per recording** (name, size, time saved; in the settings folder; old ones
      cleared after a few months; "Listen again" button; `--build` uses them), and **keys for the
      cuts**: click or Tab chooses the cut, arrows move it 1 s (Shift 5 s), S / E put the start / end

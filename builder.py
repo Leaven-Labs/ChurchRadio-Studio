@@ -1,4 +1,5 @@
 """Build one broadcast: intro + the service (prelude, end and long silences cut) + songs that fill the time = one MP3."""
+import csv
 import datetime as dt
 import json
 import os
@@ -119,6 +120,120 @@ def output_name(cfg, date):
 
 def songs_csv():
     return os.path.join(data_dir(), "songs.csv")
+
+
+# Even loudness (see audio.LOUDNESS_REFERENCE): the target the whole MP3 is brought to, in LUFS
+# (loudness_lufs in config.json; null = not evened out, as before 1.6.0).
+LOUDNESS_LUFS = -16
+
+
+def loudness_target(cfg):
+    """The loudness the MP3 is brought to (LUFS), or None when it is not evened out."""
+    value = cfg.get("loudness_lufs", LOUDNESS_LUFS)
+    if value is None or value is False:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return LOUDNESS_LUFS
+    return value if -40 <= value <= -5 else LOUDNESS_LUFS
+
+
+# The cue sheet: a CSV next to the MP3 that lists what plays when (cue_sheet in config.json), for
+# the station and for license reports. utf-8-sig, like songs.csv, so Excel shows it correctly.
+CUE_FIELDS = ["Starts at", "Ends at", "Length", "Part", "Title", "File", "May broadcast", "Permission", "Note"]
+
+
+def cue_time(sec):
+    """A time in the cue sheet: 0:00:00 (hours, minutes, seconds)."""
+    sec = int(round(max(0.0, sec)))
+    return f"{sec // 3600}:{sec // 60 % 60:02d}:{sec % 60:02d}"
+
+
+def cue_sheet_path(mp3):
+    """Where the cue sheet of this MP3 is saved: beside it, "<name> cue sheet.csv"."""
+    return os.path.splitext(mp3)[0] + " cue sheet.csv"
+
+
+def cue_rows(intro, intro_len, service, svc_len, chosen, rows):
+    """The lines of the cue sheet: the intro, the service and each song, with their times in the MP3.
+    chosen: the songs as catalog.songs_for gives them; rows: the song list (for title and permission)."""
+    lines, t = [], 0.0
+
+    def add(part, length, title, path, row=None):
+        nonlocal t
+        row = row or {}
+        lines.append({"Starts at": cue_time(t), "Ends at": cue_time(t + length), "Length": cue_time(length),
+                      "Part": part, "Title": title, "File": os.path.basename(path),
+                      "May broadcast": (catalog.broadcast_label(row) or "Not looked up") if part == "Song" else "",
+                      "Permission": (row.get("permission") or "").strip(),
+                      "Note": (row.get("pd_note") or "").strip()})
+        t += length
+
+    if intro:
+        add("Intro", intro_len, "Intro", intro)
+    add("Service", svc_len, "The service", service)
+    for song in chosen:
+        row = rows.get(song["path"], {})
+        title = song.get("title") or row.get("title") or os.path.splitext(os.path.basename(song["path"]))[0]
+        add("Song", song["duration"], title, song["path"], row)
+    return lines
+
+
+def write_cue_sheet(path, lines):
+    """Save the cue sheet (never half written: under another name first)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=CUE_FIELDS)
+        w.writeheader()
+        w.writerows(lines)
+    os.replace(tmp, path)
+
+
+def _loudness_cache_path():
+    return os.path.join(data_dir(), "loudness.json")
+
+
+def _loudness_key(path, start, end):
+    st = os.stat(path)
+    return f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}|{start or 0:.2f}|" \
+           + ("" if end is None else f"{end:.2f}")
+
+
+def part_loudness(parts, log=print, keep=None):
+    """The loudness (LUFS, None = silent) of each part, (path, start, end) or a path. A part whose
+    path is in keep (the intro and the songs) is measured once and remembered in loudness.json."""
+    keep = set(keep or [])
+    try:
+        with open(_loudness_cache_path(), encoding="utf-8") as fh:
+            cache = json.load(fh)
+        if not isinstance(cache, dict):
+            cache = {}
+    except (OSError, ValueError):
+        cache = {}
+    found, changed = [], False
+    for part in parts:
+        path, start, end = (part, 0.0, None) if isinstance(part, str) else part
+        key = _loudness_key(path, start, end) if path in keep else None
+        if key and key in cache:
+            found.append(cache[key])
+            continue
+        value = audio.loudness(path, start, end)
+        found.append(value)
+        if key:
+            cache[key] = value
+            changed = True
+    if changed:
+        # Forget files that are gone, so the list does not grow for ever.
+        cache = {k: v for k, v in cache.items() if os.path.exists(k.split("|")[0])}
+        tmp = _loudness_cache_path() + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(cache, fh, indent=0)
+            os.replace(tmp, _loudness_cache_path())
+        except OSError as e:
+            log(f"Could not remember the loudness of the songs ({e}); they are measured again next time.")
+    return found
 
 
 def _history_path():
@@ -292,7 +407,7 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
         log(f"Intro {audio.fmt(intro_len)} + service {audio.fmt(svc_len)}; "
             f"songs needed: {audio.fmt(max(need, 0))}")
 
-        chosen = []
+        chosen, rows = [], {}
         if need > tol:
             log("Reading song catalog ...")
             if not cfg.get("song_folders"):
@@ -329,18 +444,42 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
                                  s["duration"]) for s in chosen]})
         comp = {**audio.COMPRESSION, **cfg.get("compression", {})}
         comp["enabled"] = comp["enabled"] and compress
+        parts = ([intro] if intro else []) + [(svc, 0.0, svc_end)] + \
+            [(s["path"], s["start"], s["end"]) for s in chosen]
+        whole = intro_len + svc_end + sum(s["duration"] for s in chosen)
+        lufs = loudness_target(cfg)
+        gains = final_db = None
+        share = 0.0  # how much of the progress bar the loudness takes (the rest: writing the MP3)
+        if lufs is not None:
+            share = 0.3
+            log(f"Evening out the loudness (to {lufs:g} LUFS) ...")
+            levels = part_loudness(parts, log, keep=([intro] if intro else []) + [s["path"] for s in chosen])
+            gains = [audio.level_gain(v) for v in levels]
+            names = (["Intro"] if intro else []) + ["Service"] + \
+                [s.get("title") or os.path.splitext(os.path.basename(s["path"]))[0] for s in chosen]
+            for name, v, g in zip(names, levels, gains):
+                log(f"  {name}: " + ("silent, left as it is" if v is None else f"{v:.1f} LUFS, {g:+.1f} dB"))
+            joined = audio.measure_joined(
+                parts, gains, comp,
+                progress=(lambda sec: tell("mp3", share * min(1.0, sec / whole))) if whole > 0 else None)
+            final_db = 0.0 if joined is None else round(min(audio.MAX_BOOST_DB, lufs - joined), 2)
+            log(f"  The whole broadcast: {final_db:+.1f} dB to reach {lufs:g} LUFS")
         if comp["enabled"]:
             log(f"Writing MP3 with compression {comp['ratio']}:1 above {comp['threshold_db']} dB, "
                 f"limit {comp['limit_db']} dB ...")
         else:
             log("Writing MP3 (no compression) ...")
-        parts = ([intro] if intro else []) + [(svc, 0.0, svc_end)] + \
-            [(s["path"], s["start"], s["end"]) for s in chosen]
-        whole = intro_len + svc_end + sum(s["duration"] for s in chosen)
-        length = audio.join_to_mp3(parts, out,
-                                   cfg.get("mp3_bitrate", "192k"),
-                                   {"title": output_title(cfg, date)}, comp,
-                                   progress=(lambda sec: tell("mp3", min(1.0, sec / whole))) if whole > 0 else None)
+        length = audio.join_to_mp3(
+            parts, out, cfg.get("mp3_bitrate", "192k"), {"title": output_title(cfg, date)}, comp,
+            progress=(lambda sec: tell("mp3", share + (1 - share) * min(1.0, sec / whole))) if whole > 0 else None,
+            gains=gains, final_db=final_db)
+        if cfg.get("cue_sheet", True):
+            cue = cue_sheet_path(out)
+            try:
+                write_cue_sheet(cue, cue_rows(intro, intro_len, service, svc_end, chosen, rows))
+                log(f"Cue sheet: {cue}")
+            except OSError as e:  # (open in Excel, say): the broadcast itself is made
+                log(f"WARNING: could not save the cue sheet {cue}: {e}")
     save_history(date, [s["path"] for s in chosen], out)
     log(f"Done: {out} ({audio.fmt(length)})")
     return out

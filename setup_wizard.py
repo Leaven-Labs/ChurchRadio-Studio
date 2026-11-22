@@ -44,6 +44,18 @@ SILENCE_LEVELS = ((-50, "Only complete silence"), (-45, "A very quiet room"), (-
                   (-35, "Quiet sounds too, such as rustling"), (-30, "Soft sounds too, such as a murmur or soft organ"))
 
 
+# How loud the MP3 is made (loudness_lufs in config.json, see builder.loudness_target), in plain words.
+# None: not evened out, as before 1.6.0.
+LOUDNESS_LEVELS = ((-14, "Loud, like music streaming"), (-16, "Podcasts and web radio (the usual)"),
+                   (-18, "A little quieter"), (-23, "Broadcast standard in Europe (EBU R128)"),
+                   (-24, "Broadcast standard in the US (ATSC A/85)"))
+NOT_EVENED = "Not evened out (each part as it was recorded)"
+
+
+def loudness_text(lufs, words):
+    return f"{words}  ·  {lufs:g} LUFS"
+
+
 def level_text(db, words):
     return f"{words}  ·  {db:g} dB"
 
@@ -186,6 +198,8 @@ class SettingsForm(QWidget):
         c.update(max_silence_seconds=silence, silence_level_db=self.silence_level.currentData(),
                  trim_song_silence=self.trim_songs.isChecked())
         c.update(end_after_seconds=after, end_answer_pad=pad, check_updates=self.check_updates.isChecked())
+        c["loudness_lufs"] = self.loudness.currentData()
+        c["cue_sheet"] = self.cue_sheet.isChecked()
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
                  date_format=self.date_format.currentData() or builder.DATE_FORMAT,
                  output_folder=self.output.text().strip(), intro=intro,
@@ -289,9 +303,28 @@ class SettingsForm(QWidget):
         self.name.textChanged.connect(lambda _text: self.show_name_example())
         self.row("Length (minutes):", self.minutes, width=70)
         self.row("May run over by (seconds):", self.tolerance, "songs never go past this", width=70)
+        # Even loudness: the list of levels; a level typed in config.json is listed too.
+        self.loudness = QComboBox()
+        lufs = builder.loudness_target(c)
+        levels = dict(LOUDNESS_LEVELS)
+        if lufs is not None and lufs not in levels:
+            levels[lufs] = "Your own level"
+        for value in sorted(levels, reverse=True):
+            self.loudness.addItem(loudness_text(value, levels[value]), value)
+        self.loudness.addItem(NOT_EVENED, None)
+        self.loudness.setCurrentIndex(self.loudness.count() - 1 if lufs is None
+                                      else sorted(levels, reverse=True).index(lufs))
+        self.loudness.setToolTip("The intro, the service and each song are made equally loud, and the whole "
+                                 "MP3 is brought to this level. Ask your station if it wants a level; "
+                                 "if not, keep the usual one.")
+        self.row("Loudness:", self.loudness, width=380)
         line = self.row("Save the MP3 in:", self.output)
         line.addWidget(self.button("Browse...", lambda: self.pick_folder(self.output)))
         self.body.addWidget(ui.label("Leave it empty to save the MP3 next to the service recording.", "hint"))
+        self.cue_sheet = QCheckBox("Save a cue sheet next to the MP3 (what plays when, for your station and "
+                                   "license reports)")
+        self.cue_sheet.setChecked(bool(c.get("cue_sheet", True)))
+        self.body.addWidget(self.cue_sheet)
         self.body.addSpacing(10)
         self.theme = QComboBox()
         self.theme.addItems([ui.THEME_LABELS[t] for t in ui.THEMES])

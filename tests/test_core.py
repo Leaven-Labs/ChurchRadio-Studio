@@ -355,6 +355,170 @@ class Compression(unittest.TestCase):
         self.assertEqual(audio.compression_filter({"enabled": False}), "")
 
 
+def _level_tone(path, seconds, db, freq=440):
+    """Write a sine tone of seconds at db (dB on lavfi's sine, which is about -21 LUFS at 0)."""
+    import subprocess
+    subprocess.run([audio.find_tool("ffmpeg"), "-v", "error", "-y", "-f", "lavfi", "-i",
+                    f"sine=f={freq}:d={seconds}", "-af", f"volume={db}dB", "-ac", "2", path], check=True)
+
+
+class Loudness(unittest.TestCase):
+    SUMMARY = """[Parsed_ebur128_0 @ 0x1] Summary:
+
+  Integrated loudness:
+    I:         -19.4 LUFS
+    Threshold: -29.6 LUFS
+
+  Loudness range:
+    LRA:         3.1 LU
+"""
+
+    def test_read_the_summary(self):
+        self.assertEqual(audio.integrated_loudness(self.SUMMARY), -19.4)
+        self.assertIsNone(audio.integrated_loudness(self.SUMMARY.replace("-19.4", "-70.0")))  # silence
+        self.assertIsNone(audio.integrated_loudness(self.SUMMARY.replace("-19.4", "-inf")))
+        self.assertIsNone(audio.integrated_loudness("no summary"))
+
+    def test_gain_has_limits(self):
+        self.assertEqual(audio.level_gain(-26.0), 6.0)
+        self.assertEqual(audio.level_gain(-8.5), -11.5)
+        self.assertEqual(audio.level_gain(-50.0), audio.MAX_BOOST_DB)   # a quiet part is not turned up too far
+        self.assertEqual(audio.level_gain(10.0), -audio.MAX_CUT_DB)
+        self.assertEqual(audio.level_gain(None), 0.0)                     # silence is left as it is
+
+    def test_target_from_the_settings(self):
+        self.assertEqual(builder.loudness_target({}), builder.LOUDNESS_LUFS)  # on unless turned off
+        self.assertEqual(builder.loudness_target({"loudness_lufs": -23}), -23)
+        self.assertIsNone(builder.loudness_target({"loudness_lufs": None}))
+        self.assertIsNone(builder.loudness_target({"loudness_lufs": False}))
+        for bad in ("loud", 0, -99, [1]):
+            self.assertEqual(builder.loudness_target({"loudness_lufs": bad}), builder.LOUDNESS_LUFS)
+
+    def test_the_filter_graph(self):
+        parts = ["a.wav", ("b.wav", 1.0, 5.0)]
+        old = audio._graph(parts, None, {**audio.COMPRESSION}, None, -1)
+        self.assertNotIn("volume", old)
+        self.assertEqual(old.count("alimiter"), 1)  # as before 1.6.0
+        new = audio._graph(parts, [3.0, -2.5], {**audio.COMPRESSION}, 1.5, -1)
+        self.assertIn("[0:a:0]volume=+3.00dB,", new)
+        self.assertIn("asetpts=PTS-STARTPTS,volume=-2.50dB,", new)
+        self.assertRegex(new, r"acompressor=[^,]+,volume=\+1\.50dB,alimiter=")
+        off = audio._graph(parts, [0.0, 0.0], {**audio.COMPRESSION, "enabled": False}, 0.0, -1)
+        self.assertNotIn("acompressor", off)
+        self.assertIn("alimiter", off)  # the limiter stays when the compressor is off
+        self.assertTrue(audio._graph(parts, None, None, None, None, measure=True).endswith("ebur128=framelog=quiet[out]"))
+
+    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
+    def test_parts_come_out_equally_loud_at_the_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            loud, quiet = os.path.join(d, "loud.wav"), os.path.join(d, "quiet.wav")
+            _level_tone(loud, 20, 6)
+            _level_tone(quiet, 20, -6, freq=330)
+            self.assertGreater(audio.loudness(loud) - audio.loudness(quiet), 11)
+            self.assertAlmostEqual(audio.loudness(loud, 5, 10), audio.loudness(loud), delta=0.5)
+            for comp in ({**audio.COMPRESSION}, {**audio.COMPRESSION, "enabled": False}):
+                gains = [audio.level_gain(audio.loudness(p)) for p in (loud, quiet)]
+                final = -16 - audio.measure_joined([loud, quiet], gains, comp)
+                out = os.path.join(d, "out.mp3")
+                audio.join_to_mp3([loud, quiet], out, compression=comp, gains=gains, final_db=final)
+                self.assertAlmostEqual(audio.loudness(out), -16, delta=1.0)
+                self.assertAlmostEqual(audio.loudness(out, 0, 20), audio.loudness(out, 20, 40), delta=1.0)
+
+    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
+    def test_build_evens_out_and_remembers_the_songs(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": d}):
+            songs = os.path.join(d, "songs")
+            os.makedirs(songs)
+            svc = os.path.join(d, "service.wav")
+            _level_tone(svc, 20, -9, freq=220)  # a quiet sermon
+            for i, db in enumerate((6, 0, 3)):  # loud songs
+                _level_tone(os.path.join(songs, f"song{i}.wav"), 95, db, freq=500 + 100 * i)
+            cfg = {"intro": "", "song_folders": [songs], "output_folder": d, "target_minutes": 5,
+                   "broadcast_name": "Test", "check_song_words": False, "trim_song_silence": False,
+                   "loudness_lufs": -18}
+            lines = []
+            out = builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lines.append,
+                                start_mode="Keep start", cut_end=False)
+            self.assertAlmostEqual(audio.loudness(out), -18, delta=1.0)
+            self.assertAlmostEqual(audio.loudness(out, 0, 19), audio.loudness(out, 25, 110), delta=1.5)
+            self.assertTrue(any("Evening out the loudness (to -18 LUFS)" in line for line in lines))
+            with open(os.path.join(d, "loudness.json"), encoding="utf-8") as fh:
+                self.assertEqual(len(json.load(fh)), 3)  # the songs, not the service (a temporary file)
+            with mock.patch.object(audio, "loudness", wraps=audio.loudness) as measured:
+                builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lambda m: None,
+                              start_mode="Keep start", cut_end=False)
+            self.assertEqual(measured.call_count, 1)  # only the service: the songs were remembered
+
+
+class CueSheet(unittest.TestCase):
+    def test_times(self):
+        self.assertEqual([builder.cue_time(x) for x in (0, 59.6, 61, 3725.2, -3)],
+                         ["0:00:00", "0:01:00", "0:01:01", "1:02:05", "0:00:00"])
+        self.assertEqual(builder.cue_sheet_path(os.path.join("x", "St. John Radio 2026-11-15.mp3")),
+                         os.path.join("x", "St. John Radio 2026-11-15 cue sheet.csv"))
+
+    def test_lines(self):
+        chosen = [{"path": "/s/Amazing Grace.mp3", "title": "Amazing Grace", "duration": 229.4},
+                  {"path": "/s/In Christ Alone.mp3", "title": "", "duration": 226.0},
+                  {"path": "/s/new.mp3", "title": "", "duration": 100.0}]
+        rows = {"/s/Amazing Grace.mp3": {"public_domain": "yes", "pd_note": "Published 1779."},
+                "/s/In Christ Alone.mp3": {"title": "In Christ Alone", "public_domain": "no",
+                                           "permission": "CCLI Streaming License 123456"}}
+        lines = builder.cue_rows("/r/Intro.mp3", 30.0, "/r/Service.mkv", 2862.0, chosen, rows)
+        self.assertEqual([(x["Part"], x["Title"], x["Starts at"], x["Ends at"]) for x in lines],
+                         [("Intro", "Intro", "0:00:00", "0:00:30"),
+                          ("Service", "The service", "0:00:30", "0:48:12"),
+                          ("Song", "Amazing Grace", "0:48:12", "0:52:01"),
+                          ("Song", "In Christ Alone", "0:52:01", "0:55:47"),
+                          ("Song", "new", "0:55:47", "0:57:27")])
+        self.assertEqual([x["May broadcast"] for x in lines], ["", "", "Public domain", "Allowed", "Not looked up"])
+        self.assertEqual((lines[3]["Permission"], lines[2]["Note"], lines[2]["File"]),
+                         ("CCLI Streaming License 123456", "Published 1779.", "Amazing Grace.mp3"))
+        no_intro = builder.cue_rows("", 0.0, "/r/Service.mkv", 60.0, [], {})
+        self.assertEqual([x["Part"] for x in no_intro], ["Service"])
+
+    def test_saved_for_excel(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x cue sheet.csv")
+            lines = builder.cue_rows("", 0.0, "Service.wav", 60.0,
+                                     [{"path": "Café.mp3", "title": "Café – Hymn", "duration": 10.0}], {})
+            builder.write_cue_sheet(path, lines)
+            with open(path, "rb") as fh:
+                self.assertTrue(fh.read().startswith(b"\xef\xbb\xbf"))  # Excel reads it as UTF-8
+            import csv as _csv
+            with open(path, newline="", encoding="utf-8-sig") as fh:
+                back = list(_csv.DictReader(fh))
+            self.assertEqual((back[1]["Title"], list(back[0])), ("Café – Hymn", builder.CUE_FIELDS))
+            self.assertEqual(sorted(os.listdir(d)), ["x cue sheet.csv"])
+
+    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
+    def test_build_saves_it_unless_turned_off(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": d}):
+            songs = os.path.join(d, "songs")
+            os.makedirs(songs)
+            svc = os.path.join(d, "service.wav")
+            _level_tone(svc, 20, 0)
+            for i in range(3):
+                _level_tone(os.path.join(songs, f"song{i}.wav"), 95, 0, freq=500 + 100 * i)
+            cfg = {"intro": "", "song_folders": [songs], "output_folder": d, "target_minutes": 5,
+                   "broadcast_name": "Test", "check_song_words": False, "trim_song_silence": False,
+                   "loudness_lufs": None, "compression": {"enabled": False}}
+            out = builder.build(svc, cfg=cfg, date=D(2026, 11, 15), log=lambda m: None,
+                                start_mode="Keep start", cut_end=False)
+            import csv as _csv
+            with open(builder.cue_sheet_path(out), newline="", encoding="utf-8-sig") as fh:
+                lines = list(_csv.DictReader(fh))
+            self.assertEqual([x["Part"] for x in lines], ["Service", "Song", "Song", "Song"])
+            self.assertEqual((lines[0]["File"], lines[1]["Starts at"], lines[-1]["May broadcast"]),
+                             ("service.wav", "0:00:20", "Not looked up"))
+            self.assertAlmostEqual(audio.duration(out), 305, delta=1)
+            self.assertEqual(lines[-1]["Ends at"], "0:05:05")  # the times match the MP3
+            os.remove(builder.cue_sheet_path(out))
+            builder.build(svc, cfg={**cfg, "cue_sheet": False}, date=D(2026, 11, 15), log=lambda m: None,
+                          start_mode="Keep start", cut_end=False)
+            self.assertFalse(os.path.exists(builder.cue_sheet_path(out)))
+
+
 class Prelude(unittest.TestCase):
     def test_phrase(self):
         words = [("Look", 1.0), (" Good", 330.0), (" morning,", 330.1), ("good", 400.0), ("morning", 400.2)]
@@ -1842,6 +2006,43 @@ class Windows(unittest.TestCase):
             w.silence_seconds.setText(bad)
             with self.assertRaises(ValueError):
                 w.collect()
+
+    def test_result_card_opens_the_cue_sheet(self):
+        card = mainwindow.ResultCard()
+        self.addCleanup(card.deleteLater)
+        mp3 = os.path.join(self.dir.name, "Test 2026-11-15.mp3")
+        open(mp3, "wb").close()
+        card.show_result(mp3, 3600.0)
+        self.assertTrue(card.cue_btn.isHidden())  # no cue sheet (turned off in Settings)
+        open(builder.cue_sheet_path(mp3), "w").close()
+        card.show_result(mp3, 3600.0)
+        self.assertFalse(card.cue_btn.isHidden())
+        with mock.patch.object(mainwindow.songs_window, "play") as play:
+            card.cue_btn.click()
+        play.assert_called_once_with(builder.cue_sheet_path(mp3))
+
+    def test_settings_cue_sheet(self):
+        self.assertTrue(self.wizard().collect()["cue_sheet"])
+        w = self.wizard(cue_sheet=False)
+        self.assertFalse(w.cue_sheet.isChecked())
+        w.cue_sheet.setChecked(True)
+        self.assertTrue(w.collect()["cue_sheet"])
+
+    def test_settings_loudness(self):
+        """How loud the MP3 is made: the usual level at first, a standard, off, or one typed in config.json."""
+        w = self.wizard()
+        self.assertEqual(w.loudness.currentData(), -16)
+        self.assertIn("the usual", w.loudness.currentText())
+        w.loudness.setCurrentIndex(w.loudness.findData(-23))
+        self.assertEqual(w.collect()["loudness_lufs"], -23)
+        w.loudness.setCurrentIndex(w.loudness.count() - 1)
+        self.assertIsNone(w.collect()["loudness_lufs"])
+        self.assertIn("Not evened out", w.loudness.currentText())
+        off = self.wizard(loudness_lufs=None)
+        self.assertIsNone(off.loudness.currentData())
+        own = self.wizard(loudness_lufs=-20)
+        self.assertEqual((own.loudness.currentData(), own.collect()["loudness_lufs"]), (-20, -20))
+        self.assertIn("Your own level", own.loudness.currentText())
 
     def test_settings_end_timing_and_update_check(self):
         """The seconds kept after the pastor's last words and after the congregation's answer."""

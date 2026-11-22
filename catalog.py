@@ -106,6 +106,20 @@ def cleared(row):
             or bool((row.get("permission") or "").strip()))
 
 
+# What "May broadcast" says for a song (the Songs page and the cue sheet): a typed permission
+# counts as Allowed. Nothing for a song not looked up yet.
+BROADCAST_LABELS = {"yes": "Public domain", "allowed": "Allowed", "no": "Needs permission", "check": "Check",
+                    "unknown": "Not found"}
+
+
+def broadcast_label(row):
+    """"Public domain", "Allowed", "Needs permission", "Check", "Not found", or "" (not looked up)."""
+    pd = (row.get("public_domain") or "").strip().lower()
+    if (row.get("permission") or "").strip() and pd != "yes":
+        pd = "allowed"
+    return BROADCAST_LABELS.get(pd, "")
+
+
 def check_words(path, rows, count_words, min_words=MIN_WORDS, log=print):
     """Listen once to every song not checked yet and count the words heard.
 

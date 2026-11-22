@@ -227,15 +227,58 @@ def _lin(db):
     return 10 ** (db / 20)
 
 
-def compression_filter(comp=None):
-    """ffmpeg filter text for the final compressor + limiter, or "" when off."""
+def compression_filter(comp=None, limit=True):
+    """ffmpeg filter text for the final compressor + limiter, or "" when off.
+    limit=False: the compressor alone (the limiter comes later, see limiter_filter)."""
     c = {**COMPRESSION, **(comp or {})}
     if not c["enabled"]:
         return ""
-    return (f"acompressor=threshold={_lin(c['threshold_db']):.6f}:ratio={c['ratio']}"
+    text = (f"acompressor=threshold={_lin(c['threshold_db']):.6f}:ratio={c['ratio']}"
             f":attack={c['attack_ms']}:release={c['release_ms']}"
-            f":makeup={max(1.0, _lin(c['makeup_db'])):.4f}:detection=rms:link=maximum,"
-            f"alimiter=limit={min(1.0, max(0.0625, _lin(c['limit_db']))):.4f}:attack=5:release=50:level=0")
+            f":makeup={max(1.0, _lin(c['makeup_db'])):.4f}:detection=rms:link=maximum")
+    return text + ("," + limiter_filter(c["limit_db"]) if limit else "")
+
+
+def limiter_filter(limit_db=COMPRESSION["limit_db"]):
+    """ffmpeg filter text for the peak limiter: nothing goes above limit_db (dBFS)."""
+    return f"alimiter=limit={min(1.0, max(0.0625, _lin(limit_db))):.4f}:attack=5:release=50:level=0"
+
+
+# Even loudness (loudness_lufs in config.json). Each part (intro, service, song) is first brought
+# to LOUDNESS_REFERENCE, so the compressor works on all of them alike; then the whole broadcast is
+# measured once more and brought to the target, and the limiter keeps the peaks under limit_db.
+# LUFS: loudness as stations and podcast apps measure it (EBU R128 / ITU-R BS.1770).
+LOUDNESS_REFERENCE = -20.0
+MAX_BOOST_DB = 12.0   # a part is never turned up more than this (a quiet recording would hiss)
+MAX_CUT_DB = 24.0
+SILENT_LUFS = -60.0   # quieter than this, a part is taken as silence and left as it is
+
+
+def integrated_loudness(stderr):
+    """The integrated loudness (LUFS) in the summary ffmpeg's ebur128 filter writes, or None."""
+    found = re.findall(r"^\s*I:\s+(-?(?:inf|[\d.]+))\s+LUFS", stderr, re.M)
+    if not found:
+        return None
+    value = float(found[-1])
+    return value if value > SILENT_LUFS else None
+
+
+def loudness(path, start=0.0, end=None):
+    """Integrated loudness (LUFS) of path, or of start..end seconds of it. None = silent."""
+    trim = _trim_filter((path, start, end))
+    p = run_tool([find_tool("ffmpeg"), "-hide_banner", "-nostats", "-nostdin", "-i", path, "-vn",
+                  "-af", f"{trim}ebur128=framelog=quiet", "-f", "null", "-"])
+    if p.returncode != 0:
+        raise RuntimeError(f"ffmpeg could not measure the loudness of {os.path.basename(path)}:\n"
+                           + p.stderr[-1500:])
+    return integrated_loudness(p.stderr)
+
+
+def level_gain(lufs, want=LOUDNESS_REFERENCE):
+    """dB that bring a part measured at lufs to want, within the limits above. 0 for silence."""
+    if lufs is None:
+        return 0.0
+    return round(min(MAX_BOOST_DB, max(-MAX_CUT_DB, want - lufs)), 2)
 
 
 def _trim_filter(part):
@@ -259,7 +302,8 @@ def progress_seconds(line):
 
 
 def _run_with_progress(args, on_seconds):
-    """Run ffmpeg and call on_seconds(seconds written) as it works. Errors and Stopped as _run."""
+    """Run ffmpeg and call on_seconds(seconds written) as it works. Errors and Stopped as _run.
+    Returns what ffmpeg wrote to stderr."""
     stopper = getattr(_local, "stopper", None)
     if stopper:
         stopper.check()
@@ -283,34 +327,74 @@ def _run_with_progress(args, on_seconds):
                 stopper.forget(p)
         if stopper:
             stopper.check()
+        err.seek(0)
+        text = err.read().decode(errors="replace")
         if p.returncode != 0:
-            err.seek(0)
-            raise RuntimeError(f"{os.path.basename(args[0])} failed:\n"
-                               f"{err.read().decode(errors='replace')[-1500:]}")
+            raise RuntimeError(f"{os.path.basename(args[0])} failed:\n{text[-1500:]}")
+        return text
 
 
-def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None, progress=None):
+def _graph(parts, gains, comp, final_db, limit_db, measure=False):
+    """The filter graph that joins the parts: each one trimmed, turned up or down by its gain,
+    made 44.1 kHz stereo; then the compressor, the final level and the limiter. measure=True: the
+    graph up to the final level, ending in the loudness meter (to work out final_db)."""
+    gains = gains or [0.0] * len(parts)
+    chains = "".join(f"[{i}:a:0]{_trim_filter(p)}" + (f"volume={g:+.2f}dB," if g else "")
+                     + f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}];"
+                     for i, (p, g) in enumerate(zip(parts, gains)))
+    inputs = "".join(f"[a{i}]" for i in range(len(parts)))
+    steps = [f"concat=n={len(parts)}:v=0:a=1"]
+    if final_db is None and not measure:  # as before even loudness: compressor and limiter together
+        steps.append(compression_filter(comp))
+    else:
+        steps.append(compression_filter(comp, limit=False))
+        if measure:
+            steps.append("ebur128=framelog=quiet")
+        else:
+            steps += [f"volume={final_db:+.2f}dB" if final_db else "", limiter_filter(limit_db)]
+    return f"{chains}{inputs}" + ",".join(x for x in steps if x) + "[out]"
+
+
+def _inputs(parts):
+    args = []
+    for p in parts:
+        args += ["-i", p if isinstance(p, str) else p[0]]
+    return args
+
+
+def measure_joined(parts, gains=None, compression=None, progress=None):
+    """Integrated loudness (LUFS) of the parts joined, with their gains and the compressor, before
+    the final level (see join_to_mp3). None = silent. progress(seconds) as in join_to_mp3."""
+    ff = find_tool("ffmpeg")
+    args = [ff, "-hide_banner", "-nostdin"] + _inputs(parts) + [
+        "-filter_complex", _graph(parts, gains, compression, None, None, measure=True),
+        "-map", "[out]", "-f", "null", "-"]
+    if progress:
+        err = _run_with_progress(args, progress)
+    else:
+        err = _run(args).stderr
+    return integrated_loudness(err)
+
+
+def join_to_mp3(parts, dst, bitrate="192k", meta=None, compression=None, progress=None,
+                gains=None, final_db=None):
     """Join audio files in order into one MP3 (44.1 kHz stereo).
 
     parts: paths, or (path, start, end) to use only start..end seconds of that file (end None =
     to the end): the silence at the start and end of a song is cut so the parts play back to back.
     compression: dict that changes COMPRESSION (for example {"enabled": False}).
     progress(seconds): called while ffmpeg works with the seconds of the MP3 written so far.
+    gains: dB for each part (even loudness, see level_gain); final_db: dB for the whole after
+    the compressor, before the limiter (None = no even loudness: no final level, and no limiter
+    when the compressor is off).
 
     The MP3 is written under another name (dst + ".part") and gets its own name only when it is
     whole: a run that fails or is stopped leaves no half MP3 that looks like a finished broadcast.
     """
     ff = find_tool("ffmpeg")
-    args = [ff, "-y", "-hide_banner"]
-    for p in parts:
-        args += ["-i", p if isinstance(p, str) else p[0]]
-    chains = "".join(f"[{i}:a:0]{_trim_filter(p)}aresample=44100,"
-                     f"aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}];"
-                     for i, p in enumerate(parts))
-    inputs = "".join(f"[a{i}]" for i in range(len(parts)))
-    comp = compression_filter(compression)
-    args += ["-filter_complex", f"{chains}{inputs}concat=n={len(parts)}:v=0:a=1"
-             + (f",{comp}" if comp else "") + "[out]",
+    comp = {**COMPRESSION, **(compression or {})}
+    args = [ff, "-y", "-hide_banner"] + _inputs(parts)
+    args += ["-filter_complex", _graph(parts, gains, comp, final_db, comp["limit_db"]),
              "-map", "[out]", "-c:a", "libmp3lame", "-b:a", bitrate]
     for k, v in (meta or {}).items():
         args += ["-metadata", f"{k}={v}"]

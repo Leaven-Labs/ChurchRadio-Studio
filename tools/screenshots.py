@@ -160,6 +160,7 @@ def pictures(app, window, mp3, ending):
     window.status.setText("Done.")
     window.show_cut_controls(make=False)
     window.result.show_result(SHOWN + "/Broadcasts/" + os.path.basename(mp3), 3598.0)
+    window.result.cue_btn.show()  # (the made-up MP3's cue sheet is not on this computer)
     save(window, "broadcast")
     card = window.wave_card
     save(window, "cuts", QRect(card.mapTo(window, card.rect().topLeft()), card.size()).adjusted(-12, -12, 12, 12))

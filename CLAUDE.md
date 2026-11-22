@@ -108,11 +108,19 @@ item. Remove it from this file once it is built.
      the MP3, a failure to write it only warns. `cue_sheet` in config.json (on unless turned off; a box
      under "Save the MP3 in" in Settings). The result card has a "Cue sheet" button when the file is
      there. Not done: a CCLI song-number column (the song list has none yet).
-  4. **Cuts remembered per recording** (name, size, time saved; in the settings folder; old ones
-     cleared after a few months; "Listen again" button; `--build` uses them), and **keys for the
-     cuts**: click or Tab chooses the cut, arrows move it 1 s (Shift 5 s), S / E put the start / end
-     cut at the play marker (also buttons "Start cut here" / "End cut here"). Not while typing in a
-     time box.
+  4. **Cuts remembered per recording, and keys for the cuts** (built November 2026).
+     - `cuts.json` in the user's folder, key `builder.recording_key` (name, size, time saved; moving the
+       file keeps it). `builder.remember_cuts(path, start, end, by)`: `by` "app" from `find_cuts` (with
+       `cut_settings`: the Start mode, the end cut and every `start_*` / `end_*` setting), "hand" from
+       `MainWindow.cut_moved`. `remembered_cuts`: hand cuts always, app cuts only with the same
+       `cut_settings`. Kept `CUTS_KEEP_DAYS` (120). `build(listen_again=...)`, `cli --listen-again`;
+       `build` tells "remembered". The window: a note "Cuts from last time (...)" and **Listen
+       again** (`MainWindow.memory`, `listen_again`); with "Check the cuts" the window looks the cuts
+       up itself (`work`).
+     - Keys: `ui.Waveform.chosen` (a click on a cut, or Tab / Shift+Tab; a gold ring while the
+       picture has focus), ← / → move it 1 s (Shift: `NUDGE_FAR` 5 s). S / E (`MainWindow.here_keys`,
+       QShortcuts like the space bar; a QLineEdit takes the letters first) and the buttons **Start
+       cut here** / **End cut here** (`here_btns`) put a cut at the play marker (`cut_here`).
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.

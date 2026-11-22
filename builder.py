@@ -265,6 +265,92 @@ def save_history(date, songs, output):
         json.dump(hist[-52:], fh, indent=1)
 
 
+# Cuts remembered per recording (cuts.json in the user's folder): choosing the same recording again
+# does not listen again. A recording is known by its name, size and the time it was saved, so a
+# recording that is replaced (or copied again) is new. Cuts the person moved are always used; cuts
+# the app found are used only while the Start mode, the end cut and the service-words settings are
+# the same as when they were found. Entries older than CUTS_KEEP_DAYS go.
+CUTS_KEEP_DAYS = 120
+
+
+def _cuts_path():
+    return os.path.join(data_dir(), "cuts.json")
+
+
+def recording_key(path):
+    st = os.stat(path)
+    return f"{os.path.basename(path)}|{st.st_size}|{int(st.st_mtime)}"
+
+
+def cut_settings(cfg, mode, cut_end):
+    """What the app's own cuts depend on: the Start mode, the end cut, and the settings of the words
+    it listens for (start_* and end_* in config.json)."""
+    mode = mode or cfg.get("service_start", "Auto")
+    words = {k: v for k, v in cfg.items() if k.startswith(("start_", "end_"))}
+    return json.dumps([mode, bool(cut_end), words], sort_keys=True, default=str)
+
+
+def _load_cuts():
+    try:
+        with open(_cuts_path(), encoding="utf-8") as fh:
+            saved = json.load(fh)
+        return saved if isinstance(saved, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_cuts(path, start, end, by, settings=None, today=None):
+    """Remember the cuts of a recording. by: "app" (found by listening; settings: cut_settings) or
+    "hand" (moved by the person). Returns False if they could not be saved (only not remembered)."""
+    today = today or dt.date.today()
+    try:
+        key = recording_key(path)
+    except OSError:
+        return False
+    saved = _load_cuts()
+    oldest = (today - dt.timedelta(days=CUTS_KEEP_DAYS)).isoformat()
+    saved = {k: v for k, v in saved.items() if isinstance(v, dict) and str(v.get("saved", "")) >= oldest}
+    saved[key] = {"start": float(start or 0.0), "end": None if end is None else float(end), "by": by,
+                  "settings": settings if by == "app" else None, "saved": today.isoformat()}
+    tmp = _cuts_path() + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(saved, fh, indent=1)
+        os.replace(tmp, _cuts_path())
+    except OSError:
+        return False
+    return True
+
+
+def remembered_cuts(path, settings):
+    """The cuts remembered for this recording that may be used, or None:
+    {"start", "end", "by" ("app" or "hand"), "saved" (YYYY-MM-DD)}."""
+    try:
+        entry = _load_cuts().get(recording_key(path))
+    except OSError:
+        return None
+    if not isinstance(entry, dict) or entry.get("by") not in ("app", "hand"):
+        return None
+    if entry["by"] == "app" and entry.get("settings") != settings:
+        return None  # found with other settings: listen again
+    try:
+        start = float(entry.get("start") or 0.0)
+        end = None if entry.get("end") is None else float(entry["end"])
+    except (TypeError, ValueError):
+        return None
+    return {"start": start, "end": end, "by": entry["by"], "saved": str(entry.get("saved", ""))}
+
+
+def remembered_text(found):
+    """What the log and the window say about remembered cuts."""
+    try:
+        day = dt.date.fromisoformat(found["saved"]).strftime("%m/%d/%Y")
+    except ValueError:
+        day = "before"
+    how = "moved by hand" if found["by"] == "hand" else "found by listening"
+    return f"Cuts from last time ({how}, {day})"
+
+
 def find_service_start(service, cfg, mode, log=print):
     """Seconds to skip at the start of the service (the organ prelude)."""
     phrase = cfg.get("start_phrase", "Good morning").strip()
@@ -328,6 +414,7 @@ def find_cuts(service, cfg=None, start_mode=None, cut_end=True, log=print, tell=
     if not cut_end:
         log("Service end: nothing cut at the end.")
     tell("end", end)
+    remember_cuts(service, start, end, "app", cut_settings(cfg, start_mode, cut_end))
     return start, end
 
 
@@ -345,7 +432,7 @@ def overlong_warning(intro_len, svc_len, target=3600, tol=30):
 
 
 def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, cut_end=True,
-          compress=True, tell=None, cuts=None):
+          compress=True, tell=None, cuts=None, listen_again=False):
     """Make the broadcast MP3. Returns the output path.
 
     warn(msg) is called when the result needs a manual edit (too long).
@@ -353,10 +440,12 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
     compress: put the broadcast compressor on the final MP3.
     cuts: (start, end) in seconds into the recording, set by the person in the window (end None =
     nothing cut at the end). The app then does not listen for the start and end itself
-    (start_mode and cut_end are not used).
+    (start_mode and cut_end are not used). With cuts None, the cuts remembered for this recording
+    are used (see remembered_cuts), unless listen_again.
     tell(what, value) is called with the numbers the window shows as they become known:
     "start" and "end" (the cuts, seconds into the recording; end None = nothing cut), "silence"
-    (seconds of long silences cut), "hour" (a dict: the lengths of the intro and the service,
+    (seconds of long silences cut), "remembered" (the cuts remembered from last time are used:
+    a dict, see remembered_cuts), "hour" (a dict: the lengths of the intro and the service,
     the songs as (title, seconds), and the target) and "mp3" (how much of the MP3 is written, 0 to 1).
     """
     tell = tell or (lambda what, value: None)
@@ -377,7 +466,17 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
     out = os.path.join(out_dir, output_name(cfg, date))
 
     with tempfile.TemporaryDirectory(prefix="churchradio_") as tmp:
-        if cuts is None:
+        found = None if cuts is not None or listen_again else \
+            remembered_cuts(service, cut_settings(cfg, start_mode, cut_end))
+        if found:
+            start, end = found["start"], found["end"]
+            log(f"{remembered_text(found)}: the service starts at {audio.fmt(start)} and ends at "
+                + (audio.fmt(end) if end is not None else "the end of the recording")
+                + ". (Not listened to again.)")
+            tell("remembered", found)
+            tell("start", start)
+            tell("end", end)
+        elif cuts is None:
             start, end = find_cuts(service, cfg, start_mode, cut_end, log, tell)
         else:
             start, end = max(0.0, float(cuts[0] or 0.0)), cuts[1]

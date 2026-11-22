@@ -60,6 +60,8 @@ def parser():
     p.add_argument("--start", choices=prelude.MODES, help="where the service starts (default: as in Settings)")
     p.add_argument("--keep-end", action="store_true", help="keep everything after the end of the service")
     p.add_argument("--no-compress", action="store_true", help="save the MP3 without the broadcast compressor")
+    p.add_argument("--listen-again", action="store_true",
+                   help="listen for the start and end again, not the cuts remembered for this recording")
     p.add_argument("--force", action="store_true", help="make the broadcast again even if its MP3 is already there")
     p.add_argument("--dry-run", action="store_true", help="only say which recording and date would be used")
     p.add_argument("--settle", type=float, default=SETTLE_MINUTES, metavar="MINUTES",
@@ -243,7 +245,7 @@ def main(argv, build=None):
         warned = []
         try:
             out = build(service, cfg=cfg, date=date, log=log, start_mode=args.start, warn=warned.append,
-                        cut_end=not args.keep_end, compress=not args.no_compress)
+                        cut_end=not args.keep_end, compress=not args.no_compress, listen_again=args.listen_again)
         except Exception as e:  # noqa: BLE001  any failure ends up in the log
             log(f"ERROR: {e}")
             return FAILED

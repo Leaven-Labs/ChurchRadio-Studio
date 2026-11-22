@@ -470,6 +470,11 @@ class MainWindow(QWidget):
         self.space = QShortcut(QKeySequence(Qt.Key_Space), self)  # play / pause, on the Broadcast page
         self.space.activated.connect(self.play_line)
         self.space.setEnabled(False)
+        self.here_keys = {}  # S and E: put the start / end cut at the play marker (Broadcast page)
+        for which, key in (("start", Qt.Key_S), ("end", Qt.Key_E)):
+            k = self.here_keys[which] = QShortcut(QKeySequence(key), self)
+            k.activated.connect(lambda w=which: self.cut_here(w))
+            k.setEnabled(False)
         self.setObjectName("root")
         self.setAcceptDrops(True)
         self.resize(1180, 860)
@@ -622,8 +627,24 @@ class MainWindow(QWidget):
         head.addStretch()
         self.wave_hint = ui.label("Drag a marker or type its time to move a cut. Click in the picture to listen "
                                   "from there.", "small")
+        self.wave_hint.setToolTip("Keys: click a cut (or press Tab) and move it with ← and → (Shift: 5 seconds). "
+                                  "S and E put the start and end cut at the play marker. Space plays and pauses.")
         head.addWidget(self.wave_hint)
         col.addLayout(head)
+        self.memory = QWidget()  # the cuts are remembered from last time: say so, and offer to listen again
+        line = QHBoxLayout(self.memory)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(10)
+        self.memory_text = ui.label("", "small")
+        self.listen_btn = QPushButton("Listen again")
+        self.listen_btn.setObjectName("mini")
+        self.listen_btn.setToolTip("Forget these cuts and listen for the start and end of the service again.")
+        self.listen_btn.clicked.connect(self.listen_again)
+        line.addWidget(self.memory_text)
+        line.addWidget(self.listen_btn)
+        line.addStretch()
+        self.memory.hide()
+        col.addWidget(self.memory)
         self.wave = ui.Waveform()
         self.wave.moved.connect(self.cut_moved)
         self.wave.changed.connect(self.show_cut_times)
@@ -645,6 +666,14 @@ class MainWindow(QWidget):
         self.line_time.setMinimumWidth(62)
         row.addWidget(self.line_btn)
         row.addWidget(self.line_time)
+        self.here_btns = {}
+        for which, text in (("start", "Start cut here"), ("end", "End cut here")):
+            b = self.here_btns[which] = QPushButton(text)
+            b.setObjectName("mini")
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(f"Put the {which} cut at the play marker (or press {'S' if which == 'start' else 'E'}).")
+            b.clicked.connect(lambda _on=False, w=which: self.cut_here(w))
+            row.addWidget(b)
         row.addSpacing(8)
         self.zoom_label = ui.label("Zoom", "small")
         row.addWidget(self.zoom_label)
@@ -982,6 +1011,7 @@ class MainWindow(QWidget):
         if not known:
             self.make_btn.hide()
         self.make_btn.setEnabled(not self.busy)
+        self.listen_btn.setEnabled(not self.busy)
         self.make_btn.setText("Make the broadcast again" if (self.job or {}).get("made") else "Make the broadcast")
 
     def save_review(self, on):
@@ -1027,15 +1057,23 @@ class MainWindow(QWidget):
         self.choose_btn.setText("Choose another recording")
         self.launch(None)
 
+    def listen_again(self):
+        """Listen for the cuts of this recording again (not the ones remembered)."""
+        if self.job and self.may_start():
+            self.stop_playing()
+            self.launch(None, listen_again=True)
+
     def make(self):
         """Make the broadcast with the cuts as they are in the picture (checked or moved by the person)."""
         if not self.job or not self.wave.known() or not self.may_start():
             return
         self.launch((self.wave.cuts.get("start") or 0.0, self.wave.cuts.get("end")))
 
-    def launch(self, cuts):
-        """Start the work in the background (the lock is taken). cuts None: listen for them first."""
+    def launch(self, cuts, listen_again=False):
+        """Start the work in the background (the lock is taken). cuts None: use the cuts remembered
+        for this recording, or listen for them (listen_again: listen in any case)."""
         self.warning, self.reviewing = None, False
+        self.memory.hide()
         self.result.hide()
         self.stopper = audio.Stopper()
         self.show_page("broadcast")
@@ -1049,9 +1087,10 @@ class MainWindow(QWidget):
         self.status.setText(f"Working on {os.path.basename(path)} ...")
         threading.Thread(target=self.work, args=(path, self.date.get(), self.mode.currentText(),
                                                  self.cut_end.isChecked(), self.compress.isChecked(), cuts,
-                                                 self.review.isChecked(), self.stopper), daemon=True).start()
+                                                 self.review.isChecked(), self.stopper, listen_again),
+                         daemon=True).start()
 
-    def work(self, path, date, mode, cut_end, compress, cuts=None, review=False, stopper=None):
+    def work(self, path, date, mode, cut_end, compress, cuts=None, review=False, stopper=None, listen_again=False):
         try:
             with audio.stoppable(stopper or audio.Stopper()):  # (Cancel stops it: self.cancel)
                 if cuts is None:
@@ -1059,11 +1098,21 @@ class MainWindow(QWidget):
                         self.tell("recording", audio.duration(path))
                     except Exception:  # noqa: BLE001  (the build says what is wrong with the file)
                         pass
-                    if review:  # only listen for the cuts; the person makes the broadcast (self.make)
-                        self.q.put(("review", builder.find_cuts(path, None, mode, cut_end, self.log, self.tell)))
+                    if review:  # only the cuts; the person makes the broadcast (self.make)
+                        found = None if listen_again else builder.remembered_cuts(
+                            path, builder.cut_settings(builder.load_config(), mode, cut_end))
+                        if found:
+                            self.log(builder.remembered_text(found) + ". (Not listened to again.)")
+                            for what, value in (("remembered", found), ("start", found["start"]),
+                                                ("end", found["end"])):
+                                self.tell(what, value)
+                            self.q.put(("review", (found["start"], found["end"])))
+                        else:
+                            self.q.put(("review", builder.find_cuts(path, None, mode, cut_end, self.log, self.tell)))
                         return
                 out = builder.build(path, date=date, log=self.log, start_mode=mode, warn=self.set_warning,
-                                    cut_end=cut_end, compress=compress, tell=self.tell, cuts=cuts)
+                                    cut_end=cut_end, compress=compress, tell=self.tell, cuts=cuts,
+                                    listen_again=listen_again)
             try:
                 length = audio.duration(out)
             except Exception:  # noqa: BLE001  (only the length on the card is missing)
@@ -1192,6 +1241,9 @@ class MainWindow(QWidget):
         """A cut was dragged or nudged: show its new time and offer to make the broadcast with it."""
         at = self.wave.cuts.get(which)
         self.steps[which].set("done", clock(at) if at else "nothing cut")
+        if self.job:  # the same recording chosen again starts with these cuts
+            builder.remember_cuts(self.job["path"], self.wave.cuts.get("start"), self.wave.cuts.get("end"), "hand")
+        self.memory.hide()
         if self.playing in ("start", "end"):  # (that piece is not where the cut is any more)
             self.stop_playing()
         self.show_cut_controls(make=True)
@@ -1237,8 +1289,25 @@ class MainWindow(QWidget):
         bar.setVisible(wave.zoomed() and wave.known())
 
     def show_space(self):
-        """The space bar plays and pauses only on the Broadcast page, once there is something to play."""
-        self.space.setEnabled(self.pages.currentIndex() == 0 and self.wave.known() and bool(self.job))
+        """The space bar plays and pauses only on the Broadcast page, once there is something to play.
+        S and E (and the buttons for them) work there too, while the cuts can be moved and there is a
+        play marker."""
+        here = self.pages.currentIndex() == 0 and self.wave.known() and bool(self.job)
+        self.space.setEnabled(here)
+        for which in ("start", "end"):
+            self.here_keys[which].setEnabled(here and not self.busy)
+            self.here_btns[which].setVisible(self.wave.known())
+            self.here_btns[which].setEnabled(here and not self.busy and self.wave.playhead is not None)
+
+    def cut_here(self, which):
+        """S / E, or the buttons: put the start or end cut at the play marker."""
+        if self.busy or not self.job or not self.wave.known():
+            return
+        if self.wave.playhead is None:
+            self.status.setText("Click in the picture first to put the play marker where the cut should go.")
+            return
+        self.wave.place(which, self.wave.playhead)  # (kept apart from the other cut and inside the recording)
+        self.wave.choose(which)
 
     def start_playing(self, which, at, seconds):
         """Play `seconds` of the recording from `at`, in the background (ffmpeg cuts the piece first).
@@ -1344,6 +1413,10 @@ class MainWindow(QWidget):
         want = ui.clock_exact(at) if at is not None else ""
         if self.line_time.text() != want:
             self.line_time.setText(want)
+        for b in self.here_btns.values():
+            want = bool(at is not None and self.job and self.wave.known() and not self.busy)
+            if b.isEnabled() != want:
+                b.setEnabled(want)
 
     def set_warning(self, msg):
         self.warning = msg
@@ -1370,6 +1443,9 @@ class MainWindow(QWidget):
             spent = time.time() - self.mp3_started
             if value >= 0.05 and spent >= 3 and self.steps["mp3"].state != "done":
                 self.steps["mp3"].set("doing", time_left(spent * (1 - value) / value))
+        elif what == "remembered":
+            self.memory_text.setText(builder.remembered_text(value) + ". The app did not listen again.")
+            self.memory.show()
         elif what in ("start", "end"):
             self.wave.set_cut(what, value)
             self.steps[what].set("done", clock(value) if value else "nothing cut")

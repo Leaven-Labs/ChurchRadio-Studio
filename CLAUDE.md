@@ -85,7 +85,10 @@ item. Remove it from this file once it is built.
      Both are cached by the script's hash. Replaces BtbN's `latest`, which was neither pinned nor
      checked. Built and tested in a cloud session (November 2026): Linux and Windows both build
      (about 4 minutes), the unit tests pass with the Linux build, MKV/MP4 (H.264, AAC, Opus) and
-     WMA/FLAC/Ogg/M4A/WAV/MP3 read; the .exe needs only Windows' own DLLs. Then look at why the
+     WMA/FLAC/Ogg/M4A/WAV/MP3 read; the .exe needs only Windows' own DLLs. Size on Windows: BtbN's
+     ffmpeg.exe + ffprobe.exe were 268 MB (81 MB packed with xz -9), the new ones 41 MB (7.5 MB), so
+     the installer should shrink from 164 MB to about 90 MB. BtbN's `latest` was ffmpeg 8.x; the pin is
+     7.1.1, as on the Mac (the tests pass on it). Moving all three to 8.x is a later, separate step. Then look at why the
      Linux download is 308 MB (Windows 164, Mac 122).
   2. **Even loudness for the whole MP3**: ffmpeg `loudnorm` to a target set in Settings.
   3. **A cue sheet next to the MP3**: what played, when, titles, permissions (for stations, CCLI).

@@ -1,4 +1,5 @@
 """Build one broadcast: intro + the service (prelude, end and long silences cut) + songs that fill the time = one MP3."""
+import csv
 import datetime as dt
 import json
 import os
@@ -136,6 +137,57 @@ def loudness_target(cfg):
     except (TypeError, ValueError):
         return LOUDNESS_LUFS
     return value if -40 <= value <= -5 else LOUDNESS_LUFS
+
+
+# The cue sheet: a CSV next to the MP3 that lists what plays when (cue_sheet in config.json), for
+# the station and for license reports. utf-8-sig, like songs.csv, so Excel shows it correctly.
+CUE_FIELDS = ["Starts at", "Ends at", "Length", "Part", "Title", "File", "May broadcast", "Permission", "Note"]
+
+
+def cue_time(sec):
+    """A time in the cue sheet: 0:00:00 (hours, minutes, seconds)."""
+    sec = int(round(max(0.0, sec)))
+    return f"{sec // 3600}:{sec // 60 % 60:02d}:{sec % 60:02d}"
+
+
+def cue_sheet_path(mp3):
+    """Where the cue sheet of this MP3 is saved: beside it, "<name> cue sheet.csv"."""
+    return os.path.splitext(mp3)[0] + " cue sheet.csv"
+
+
+def cue_rows(intro, intro_len, service, svc_len, chosen, rows):
+    """The lines of the cue sheet: the intro, the service and each song, with their times in the MP3.
+    chosen: the songs as catalog.songs_for gives them; rows: the song list (for title and permission)."""
+    lines, t = [], 0.0
+
+    def add(part, length, title, path, row=None):
+        nonlocal t
+        row = row or {}
+        lines.append({"Starts at": cue_time(t), "Ends at": cue_time(t + length), "Length": cue_time(length),
+                      "Part": part, "Title": title, "File": os.path.basename(path),
+                      "May broadcast": (catalog.broadcast_label(row) or "Not looked up") if part == "Song" else "",
+                      "Permission": (row.get("permission") or "").strip(),
+                      "Note": (row.get("pd_note") or "").strip()})
+        t += length
+
+    if intro:
+        add("Intro", intro_len, "Intro", intro)
+    add("Service", svc_len, "The service", service)
+    for song in chosen:
+        row = rows.get(song["path"], {})
+        title = song.get("title") or row.get("title") or os.path.splitext(os.path.basename(song["path"]))[0]
+        add("Song", song["duration"], title, song["path"], row)
+    return lines
+
+
+def write_cue_sheet(path, lines):
+    """Save the cue sheet (never half written: under another name first)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=CUE_FIELDS)
+        w.writeheader()
+        w.writerows(lines)
+    os.replace(tmp, path)
 
 
 def _loudness_cache_path():
@@ -355,7 +407,7 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
         log(f"Intro {audio.fmt(intro_len)} + service {audio.fmt(svc_len)}; "
             f"songs needed: {audio.fmt(max(need, 0))}")
 
-        chosen = []
+        chosen, rows = [], {}
         if need > tol:
             log("Reading song catalog ...")
             if not cfg.get("song_folders"):
@@ -421,6 +473,13 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
             parts, out, cfg.get("mp3_bitrate", "192k"), {"title": output_title(cfg, date)}, comp,
             progress=(lambda sec: tell("mp3", share + (1 - share) * min(1.0, sec / whole))) if whole > 0 else None,
             gains=gains, final_db=final_db)
+        if cfg.get("cue_sheet", True):
+            cue = cue_sheet_path(out)
+            try:
+                write_cue_sheet(cue, cue_rows(intro, intro_len, service, svc_end, chosen, rows))
+                log(f"Cue sheet: {cue}")
+            except OSError as e:  # (open in Excel, say): the broadcast itself is made
+                log(f"WARNING: could not save the cue sheet {cue}: {e}")
     save_history(date, [s["path"] for s in chosen], out)
     log(f"Done: {out} ({audio.fmt(length)})")
     return out

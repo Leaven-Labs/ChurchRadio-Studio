@@ -199,6 +199,7 @@ class SettingsForm(QWidget):
                  trim_song_silence=self.trim_songs.isChecked())
         c.update(end_after_seconds=after, end_answer_pad=pad, check_updates=self.check_updates.isChecked())
         c["loudness_lufs"] = self.loudness.currentData()
+        c["cue_sheet"] = self.cue_sheet.isChecked()
         c.update(broadcast_name=name, target_minutes=minutes, tolerance_seconds=tol,
                  date_format=self.date_format.currentData() or builder.DATE_FORMAT,
                  output_folder=self.output.text().strip(), intro=intro,
@@ -320,6 +321,10 @@ class SettingsForm(QWidget):
         line = self.row("Save the MP3 in:", self.output)
         line.addWidget(self.button("Browse...", lambda: self.pick_folder(self.output)))
         self.body.addWidget(ui.label("Leave it empty to save the MP3 next to the service recording.", "hint"))
+        self.cue_sheet = QCheckBox("Save a cue sheet next to the MP3 (what plays when, for your station and "
+                                   "license reports)")
+        self.cue_sheet.setChecked(bool(c.get("cue_sheet", True)))
+        self.body.addWidget(self.cue_sheet)
         self.body.addSpacing(10)
         self.theme = QComboBox()
         self.theme.addItems([ui.THEME_LABELS[t] for t in ui.THEMES])

@@ -30,6 +30,8 @@ ready-to-air MP3:
 - **Evens out the sound**: the intro, the service and each song are made equally loud, the whole
   MP3 is brought to the level you choose (−16 LUFS unless you change it), and a broadcast
   compressor and limiter even out the rest.
+- **Saves a cue sheet** next to the MP3: what plays when, with each song's title and whether it may be
+  broadcast, for your station and for license reports.
 
 The app is **light or dark**, as your computer is set (or as you choose in Settings):
 
@@ -116,8 +118,8 @@ page.
 3. Watch **Progress**. It takes a few minutes: about 30 seconds to find the start, 1 to 3 minutes to
    find the end, then joining and compressing. **The hour** shows the intro, the service and the
    chosen songs to scale. **Show the details** shows everything the app wrote while it worked.
-4. When it is done, a card shows the MP3 with its length and folder: **Play** it, or **Show in
-   folder**.
+4. When it is done, a card shows the MP3 with its length and folder: **Play** it, open its
+   [**Cue sheet**](#the-cue-sheet), or **Show in folder**.
 
 **Cancel**, next to the progress bar, stops a broadcast that is being made. Nothing is saved, and a
 broadcast made before is left as it was. Cuts that were already found are kept.
@@ -172,6 +174,23 @@ dim parts before and after are cut off.
 
 To check every week before the MP3 is written, tick **Check the cuts before the MP3 is written**: the
 app finds the cuts and waits for you to click **Make the broadcast**. Scheduled runs never wait.
+
+### The cue sheet
+
+Next to each MP3 the app saves a cue sheet, `St. John Radio 2026-11-15 cue sheet.csv`, that opens in
+Excel or any spreadsheet. It has one line for the intro, the service and each song:
+
+| Starts at | Ends at | Length | Part | Title | File | May broadcast | Permission | Note |
+|---|---|---|---|---|---|---|---|---|
+| 0:00:00 | 0:00:30 | 0:00:30 | Intro | Intro | Intro.mp3 | | | |
+| 0:00:30 | 0:48:12 | 0:47:42 | Service | The service | Service 2026-11-15.mkv | | | |
+| 0:48:12 | 0:52:01 | 0:03:49 | Song | Amazing Grace | Amazing Grace.mp3 | Public domain | | Published 1779. |
+| 0:52:01 | 0:55:47 | 0:03:46 | Song | In Christ Alone | In Christ Alone.mp3 | Allowed | CCLI Streaming License 123456 | |
+
+The times are where each part is heard in the MP3. **May broadcast**, **Permission** and **Note** come
+from the [Songs page](#public-domain) ("Not looked up" for a song that was not looked up). Give the
+station the sheet with the MP3, or keep the sheets for a license report such as CCLI's. To stop
+saving it, untick **Save a cue sheet next to the MP3** in Settings.
 
 ### History
 
@@ -507,6 +526,7 @@ editor for the rest (close the app first).
 | `avoid_repeat_weeks` | `4` | Songs used in this many recent broadcasts go last. |
 | `patriotic_holidays` | `memorial`, `independence`, `veterans` | Weekends that get patriotic songs. `labor` is also possible. |
 | `mp3_bitrate` | `192k` | MP3 quality. |
+| `cue_sheet` | `true` | Save a [cue sheet](#the-cue-sheet) next to the MP3 (on the Settings page). |
 | `loudness_lufs` | `-16` | [Loudness](#loudness) of the MP3 (on the Settings page). `null` = not evened out. |
 | `compression` | 4:1 above -18 dB, +6 dB, limit -1 dB | `enabled`, `ratio`, `threshold_db`, `attack_ms` (20), `release_ms` (250), `makeup_db`, `limit_db`. |
 | `models_folder` | (none) | A folder that already holds the speech models. |

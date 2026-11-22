@@ -228,10 +228,14 @@ class ResultCard(QFrame):
             col.addWidget(lab)
         row.addLayout(col, 1)
         self.play_btn, self.folder_btn = QPushButton("Play"), QPushButton("Show in folder")
+        self.cue_btn = QPushButton("Cue sheet")
+        self.cue_btn.setToolTip("Open the list of what plays when (a CSV file, for your station and license reports).")
         ui.primary(self.play_btn)
         self.play_btn.clicked.connect(lambda: self.open(False))
         self.folder_btn.clicked.connect(lambda: self.open(True))
+        self.cue_btn.clicked.connect(lambda: self.open(False, builder.cue_sheet_path(self.path)))
         row.addWidget(self.play_btn, 0, Qt.AlignTop)
+        row.addWidget(self.cue_btn, 0, Qt.AlignTop)
         row.addWidget(self.folder_btn, 0, Qt.AlignTop)
         self.hide()
 
@@ -244,11 +248,12 @@ class ResultCard(QFrame):
                                                   os.path.dirname(path)) if t))
         self.warning.setText(warning or "")
         self.warning.setVisible(bool(warning))
+        self.cue_btn.setVisible(os.path.exists(builder.cue_sheet_path(path)))
         self.show()
 
-    def open(self, folder):
-        """Play the MP3 in the PC's music player, or open the folder it is in."""
-        target = os.path.dirname(self.path) if folder else self.path
+    def open(self, folder, target=None):
+        """Play the MP3 in the PC's music player, open the folder it is in, or open target."""
+        target = target or (os.path.dirname(self.path) if folder else self.path)
         if not os.path.exists(target):
             QMessageBox.warning(self, paths.APP_NAME, f"Not found (moved or deleted):\n{target}")
             return

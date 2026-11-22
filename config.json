@@ -14,6 +14,7 @@
   "silence_level_db": -40,
   "mp3_bitrate": "192k",
   "loudness_lufs": -16,
+  "cue_sheet": true,
   "compression": {
     "enabled": true,
     "ratio": 4,

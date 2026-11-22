@@ -35,8 +35,7 @@ ON, PLAY, TITLE, SEASONS, LENGTH, PD = range(6)
 ROW_HEIGHT = 46
 KEY = Qt.UserRole + 1  # on the Title item: the song's key in the song list (its file path)
 PD_KIND = {"yes": "ok", "allowed": "ok", "check": "warn", "no": "no"}  # the colour of the label
-BROADCAST_LABELS = {"yes": "Public domain", "allowed": "Allowed", "no": "Needs permission", "check": "Check",
-                    "unknown": "Not found"}
+BROADCAST_LABELS = catalog.BROADCAST_LABELS
 NO_SELECTION = ("Click a switch to turn a song on or off. Double-click a title to rename it, or its season to "
                 "choose when it plays. Select a song to see why it may or may not be broadcast.")
 FILES_CSV = "CSV files (*.csv);;All files (*)"
@@ -69,13 +68,7 @@ def pd_label(row):
     return pdlookup.STATUS_LABELS.get(pd, "")
 
 
-def broadcast_label(row):
-    """What the May broadcast column shows: "Public domain", "Allowed", "Needs permission", "Check",
-    "Not found", or nothing for a song not looked up yet."""
-    pd = (row.get("public_domain") or "").strip().lower()
-    if (row.get("permission") or "").strip() and pd != "yes":
-        pd = "allowed"
-    return BROADCAST_LABELS.get(pd, "")
+broadcast_label = catalog.broadcast_label  # what the May broadcast column shows
 
 
 def no_words(row, min_words=catalog.MIN_WORDS):

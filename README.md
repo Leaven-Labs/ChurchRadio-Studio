@@ -601,11 +601,15 @@ one job per system. Each runs the tests, builds the program (PyInstaller, with
 `requirements-build.txt`) with an LGPL ffmpeg, packs it, installs it as a user would, self-tests it
 and makes a headless test broadcast:
 
-- **Windows**: the installer (Inno Setup) with BtbN's LGPL ffmpeg; also tests an update from the
-  previous release, and uninstalls.
-- **Linux** (Ubuntu 22.04): the `.tar.gz` with BtbN's LGPL ffmpeg and `tools/linux/install.sh`.
-- **macOS** (Apple silicon): the `.app` in a `.dmg`, signed ad hoc. ffmpeg is built from source
-  (LGPL, with LAME for MP3), checked against a known SHA-256, and cached.
+- **Windows**: the installer (Inno Setup); also tests an update from the previous release, and
+  uninstalls.
+- **Linux** (Ubuntu 22.04): the `.tar.gz` with `tools/linux/install.sh`.
+- **macOS** (Apple silicon): the `.app` in a `.dmg`, signed ad hoc.
+
+On all three, ffmpeg is built from the ffmpeg and LAME sources (LGPL, LAME for MP3), whose downloads
+are checked against a known SHA-256, and the build is cached. Windows and Linux use
+`tools/build_ffmpeg.sh` (Windows is cross-built with mingw-w64 in a Linux job); the Mac job has the
+same steps for macOS.
 
 To publish, run the **Release** workflow from the Actions tab with a new version such as `v1.0.0` (or
 push a tag `v…`): once all three jobs pass, a last job makes the release with the three downloads
@@ -658,9 +662,8 @@ The downloads include the software below. The full license texts are installed i
 
 - **[FFmpeg](https://ffmpeg.org)**: reading, trimming and encoding audio. An unchanged LGPL build,
   with its license, in the `ffmpeg` folder (in the Mac app: `Contents/Resources/ffmpeg`); the app runs
-  it as a separate program. Windows and Linux use the builds from
-  [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); the Mac build is made from the ffmpeg
-  sources with **[LAME](https://lame.sourceforge.io)** (LGPL) for MP3, by the release workflow.
+  it as a separate program. It is built from the ffmpeg sources with
+  **[LAME](https://lame.sourceforge.io)** (LGPL) for MP3, by the release workflow.
 - **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (MIT) with
   **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** (MIT), and the **Whisper** speech models
   `base.en` and `small.en` (MIT), downloaded on first use.

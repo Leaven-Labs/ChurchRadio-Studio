@@ -2481,3 +2481,31 @@ class CommandLine(unittest.TestCase):
         left = sorted(os.listdir(folder))
         self.assertEqual(len(left), 30)
         self.assertEqual(left[0], "build 05.log")  # the oldest went
+
+
+class FfmpegBuild(unittest.TestCase):
+    """tools/build_ffmpeg.sh (Windows, Linux) and the Mac job of release.yml build the same ffmpeg."""
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    NAMES = ("FFMPEG_VERSION", "LAME_VERSION", "FFMPEG_SHA256", "LAME_SHA256")
+
+    def values(self, path, pattern):
+        import re
+        with open(os.path.join(self.ROOT, path), encoding="utf-8") as f:
+            text = f.read()
+        found = {}
+        for name in self.NAMES:
+            m = re.search(pattern.format(name=name), text, re.M)
+            self.assertIsNotNone(m, f"{name} not found in {path}")
+            found[name] = m.group(1)
+        return found
+
+    def test_same_versions_and_checksums_as_the_mac(self):
+        script = self.values("tools/build_ffmpeg.sh", r'^{name}="([^"]+)"')
+        mac = self.values(".github/workflows/release.yml", r'^\s+{name}: "([^"]+)"')
+        self.assertEqual(script, mac)
+        for name in ("FFMPEG_SHA256", "LAME_SHA256"):
+            self.assertRegex(script[name], r"^[0-9a-f]{64}$")
+
+    def test_no_prebuilt_ffmpeg_is_downloaded(self):
+        with open(os.path.join(self.ROOT, ".github/workflows/release.yml"), encoding="utf-8") as f:
+            self.assertNotIn("FFmpeg-Builds", f.read())

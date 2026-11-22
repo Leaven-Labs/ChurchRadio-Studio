@@ -23,8 +23,44 @@ permissions:
   contents: read
 
 jobs:
+  # ------------------------------------------------------------------
+  # The Windows ffmpeg: built from the pinned ffmpeg and LAME sources by tools/build_ffmpeg.sh,
+  # cross-compiled with mingw-w64 on Linux (much simpler than building on Windows), cached until
+  # the script changes, and handed to the Windows job. The Windows job checks and tests it.
+  # ------------------------------------------------------------------
+  ffmpeg-windows:
+    name: ffmpeg for Windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30   # the build takes about 4 minutes when not cached
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cached ffmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: build/ffmpeg-win64
+          key: ffmpeg-win64-ubuntu24.04-${{ hashFiles('tools/build_ffmpeg.sh') }}
+
+      - name: Build ffmpeg (LGPL, with LAME for MP3)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 nasm
+          tools/build_ffmpeg.sh win64 build/ffmpeg-win64
+
+      - name: Hand it to the Windows job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ffmpeg-win64   # not churchradio-studio-*: the release job takes only those
+          path: build/ffmpeg-win64
+          retention-days: 1
+
   windows:
     name: Windows installer
+    needs: ffmpeg-windows
     runs-on: windows-latest
 
     env:
@@ -80,39 +116,20 @@ jobs:
           $mb = [math]::Round(((Get-ChildItem dist\ChurchRadio-Studio -Recurse -File | Measure-Object Length -Sum).Sum)/1MB, 1)
           Write-Host "Program folder: $mb MB"
 
-      # ffmpeg is installed with the app: the LGPL build from BtbN/FFmpeg-Builds (no GPL parts,
-      # so it can be shipped with this app). The newest release-branch build is used; the step
-      # checks that it is LGPL, that it can write MP3 and that the filters the app uses exist.
+      # ffmpeg is installed with the app: the LGPL build made by the ffmpeg-windows job (no GPL
+      # parts, so it can be shipped with this app). The step checks that it is LGPL, that it can
+      # write MP3, WAV and raw sound, and that the filters the app uses exist.
       - name: Get ffmpeg (LGPL build)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ffmpeg-win64
+          path: build/ffmpeg
+
+      - name: Check ffmpeg
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
-          $rel = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } `
-              -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest"
-          $assets = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n(\d+)\.(\d+)-latest-win64-lgpl-\d+\.\d+\.zip$' } |
-              Sort-Object { [int]($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$','$1') * 1000 + [int]($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$','$2') } -Descending
-          if (-not $assets) { throw "No LGPL win64 ffmpeg build found in BtbN/FFmpeg-Builds 'latest'." }
-          $asset = $assets[0]
-          Write-Host "ffmpeg build: $($asset.name)"
-          $zip = Join-Path $env:RUNNER_TEMP $asset.name
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
-          Write-Host "SHA-256: $((Get-FileHash $zip -Algorithm SHA256).Hash)"
-          $x = Join-Path $env:RUNNER_TEMP "ffmpeg-x"
-          Expand-Archive $zip -DestinationPath $x -Force
-          $bin = Get-ChildItem $x -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-          $root = Split-Path (Split-Path $bin.FullName)
-          New-Item -ItemType Directory -Force -Path build\ffmpeg | Out-Null
-          Copy-Item (Join-Path $root "bin\ffmpeg.exe"), (Join-Path $root "bin\ffprobe.exe") build\ffmpeg\
-          Get-ChildItem $root -File -Filter "LICENSE*" | Copy-Item -Destination build\ffmpeg\
-          @(
-            "ffmpeg is free software licensed under the GNU Lesser General Public License (LGPL) 2.1 or later.",
-            "This copy is the LGPL Windows build $($asset.name) from https://github.com/BtbN/FFmpeg-Builds",
-            "(build scripts and the exact library versions are listed there).",
-            "ffmpeg source code: https://ffmpeg.org/download.html  -- ChurchRadio Studio runs ffmpeg as a",
-            "separate program; it is not changed."
-          ) | Set-Content build\ffmpeg\README-ffmpeg.txt -Encoding utf8
+          Get-Content build\ffmpeg\README-ffmpeg.txt
           $cfg = (& build\ffmpeg\ffmpeg.exe -hide_banner -buildconf 2>&1) -join "`n"
           if ($cfg -match "enable-gpl") { throw "This ffmpeg build is GPL, not LGPL. Not shipping it." }
           if ($cfg -notmatch "enable-libmp3lame") { throw "This ffmpeg build cannot write MP3 (no libmp3lame)." }
@@ -122,6 +139,12 @@ jobs:
           }
           & build\ffmpeg\ffmpeg.exe -v error -y -f lavfi -i "sine=d=2" -c:a libmp3lame -b:a 192k "$env:RUNNER_TEMP\t.mp3"
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg could not write a test MP3." }
+          & build\ffmpeg\ffmpeg.exe -v error -y -i "$env:RUNNER_TEMP\t.mp3" -ac 2 -ar 44100 -c:a pcm_s16le "$env:RUNNER_TEMP\t.wav"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg could not write a test WAV." }
+          & build\ffmpeg\ffmpeg.exe -v error -y -i "$env:RUNNER_TEMP\t.wav" -ac 1 -ar 16000 -f s16le "$env:RUNNER_TEMP\t.raw"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg could not write raw sound (s16le)." }
+          & build\ffmpeg\ffprobe.exe -v error -show_entries format=duration -of csv=p=0 "$env:RUNNER_TEMP\t.wav"
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe does not work." }
           Get-ChildItem build\ffmpeg | Select-Object Name, Length
 
       - name: Collect the third-party licenses
@@ -354,33 +377,30 @@ jobs:
           test -x dist/ChurchRadio-Studio/ChurchRadio-Studio || { echo "PyInstaller did not make the program"; exit 1; }
           du -sh dist/ChurchRadio-Studio
 
-      # The same LGPL build source as Windows (BtbN/FFmpeg-Builds), with the same checks.
-      - name: Get ffmpeg (LGPL build)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # ffmpeg from the pinned ffmpeg and LAME sources (tools/build_ffmpeg.sh), built on this job's
+      # Ubuntu so it runs on the same Linux versions as the app. Cached until the script changes.
+      - name: Cached ffmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: build/ffmpeg-linux
+          key: ffmpeg-linux-ubuntu22.04-${{ hashFiles('tools/build_ffmpeg.sh') }}
+
+      - name: Build ffmpeg (LGPL, with LAME for MP3)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y nasm zlib1g-dev
+          tools/build_ffmpeg.sh linux build/ffmpeg-linux
+
+      - name: Add ffmpeg
         run: |
           set -euo pipefail
-          read -r name url < <(gh api repos/BtbN/FFmpeg-Builds/releases/tags/latest --jq \
-            '[.assets[] | select(.name | test("^ffmpeg-n[0-9]+\\.[0-9]+-latest-linux64-lgpl-[0-9]+\\.[0-9]+\\.tar\\.xz$"))]
-             | sort_by(.name | capture("^ffmpeg-n(?<a>[0-9]+)\\.(?<b>[0-9]+)") | [(.a|tonumber), (.b|tonumber)])
-             | last | "\(.name) \(.browser_download_url)"')
-          [ -n "$name" ] && [ "$name" != "null" ] || { echo "No LGPL linux64 ffmpeg build found in BtbN/FFmpeg-Builds 'latest'."; exit 1; }
-          echo "ffmpeg build: $name"
-          curl -fsSL --retry 5 -o "$RUNNER_TEMP/$name" "$url"
-          sha256sum "$RUNNER_TEMP/$name"
-          mkdir -p "$RUNNER_TEMP/ffmpeg-x" && tar -xJf "$RUNNER_TEMP/$name" -C "$RUNNER_TEMP/ffmpeg-x"
-          root=$(dirname "$(dirname "$(find "$RUNNER_TEMP/ffmpeg-x" -type f -name ffmpeg -path '*/bin/*' | head -1)")")
           ff=dist/ChurchRadio-Studio/ffmpeg
           mkdir -p "$ff"
-          cp "$root/bin/ffmpeg" "$root/bin/ffprobe" "$ff/"
-          cp "$root"/LICENSE* "$ff/" 2>/dev/null || true
-          printf '%s\n' \
-            "ffmpeg is free software licensed under the GNU Lesser General Public License (LGPL) 2.1 or later." \
-            "This copy is the LGPL Linux build $name from https://github.com/BtbN/FFmpeg-Builds" \
-            "(build scripts and the exact library versions are listed there)." \
-            "ffmpeg source code: https://ffmpeg.org/download.html  -- ChurchRadio Studio runs ffmpeg as a" \
-            "separate program; it is not changed." > "$ff/README-ffmpeg.txt"
+          cp build/ffmpeg-linux/* "$ff/"
+          cat "$ff/README-ffmpeg.txt"
           tools/check_ffmpeg.sh "$ff/ffmpeg"
+          ldd "$ff/ffmpeg"
 
       - name: Licenses, install script
         run: |

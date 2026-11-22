@@ -27,7 +27,9 @@ ready-to-air MP3:
 - **Fills the time** to your broadcast length (never more than 30 seconds over) with your own songs
   that **fit the church year**, plus patriotic songs on national holiday weekends. Songs used in
   recent weeks go last.
-- **Evens out the sound** with a broadcast compressor and limiter.
+- **Evens out the sound**: the intro, the service and each song are made equally loud, the whole
+  MP3 is brought to the level you choose (−16 LUFS unless you change it), and a broadcast
+  compressor and limiter even out the rest.
 
 The app is **light or dark**, as your computer is set (or as you choose in Settings):
 
@@ -98,7 +100,7 @@ page.
 1. **Welcome.**
 2. **Broadcast**: your program's name (used in the file name, e.g. `St. John Radio 2026-11-15.mp3`),
    how the [date is written](#the-date-in-the-file-name), the broadcast length, how far over it may
-   run, and where to save the MP3 (empty = next to the recording).
+   run, [how loud](#loudness) the MP3 is, and where to save the MP3 (empty = next to the recording).
 3. **Intro**: the intro that plays first, or none.
 4. **Songs**: the folders that hold your songs (folders inside them are included).
 5. **Service words**: the opening words, the pastor's last words and the congregation's answer, as
@@ -431,6 +433,31 @@ hymns; newer songs are listed by title only.
 
 Most settings are on the **Settings** page; click **Save** when you have changed them.
 
+### Loudness
+
+**Loudness** (on the Broadcast part of the page) sets how loud the MP3 is. The app measures the
+intro, the service and each song, makes them equally loud, and brings the whole broadcast to the
+level chosen, so a quiet sermon and a loud CD play at the same level and your station gets the same
+level every week. The levels are in LUFS, the measure stations and podcast apps use:
+
+| Choice | LUFS | For |
+|---|---|---|
+| Loud, like music streaming | −14 | |
+| Podcasts and web radio (the usual) | −16 | most stations and the web |
+| A little quieter | −18 | |
+| Broadcast standard in Europe (EBU R128) | −23 | stations that ask for R128 |
+| Broadcast standard in the US (ATSC A/85) | −24 | stations that ask for A/85 |
+| Not evened out | | each part as it was recorded (as before 1.6.0) |
+
+If your station asks for a level, choose it; if not, keep the usual one. A part is never turned up
+by more than 12 dB, so a very quiet recording stays a little quieter rather than hissing. A song is
+measured the first time it is used and remembered (`loudness.json` in
+[your settings folder](#where-your-files-are)). The log lists each part's loudness and how much it
+was turned up or down. Evening out takes a little longer: the broadcast is read once more before
+the MP3 is written.
+
+### Service words
+
 Under **Service words**, two numbers set how much is kept after the words that end the service:
 **Seconds kept after them** (after the pastor's last words, used when the congregation's answer is
 not heard; 5 at first) and **Seconds kept after it** (after the answer; 0.5 at first). Give more
@@ -480,6 +507,7 @@ editor for the rest (close the app first).
 | `avoid_repeat_weeks` | `4` | Songs used in this many recent broadcasts go last. |
 | `patriotic_holidays` | `memorial`, `independence`, `veterans` | Weekends that get patriotic songs. `labor` is also possible. |
 | `mp3_bitrate` | `192k` | MP3 quality. |
+| `loudness_lufs` | `-16` | [Loudness](#loudness) of the MP3 (on the Settings page). `null` = not evened out. |
 | `compression` | 4:1 above -18 dB, +6 dB, limit -1 dB | `enabled`, `ratio`, `threshold_db`, `attack_ms` (20), `release_ms` (250), `makeup_db`, `limit_db`. |
 | `models_folder` | (none) | A folder that already holds the speech models. |
 | `setup_done` | `false` | Set to `false` to see the setup wizard again. |
@@ -494,8 +522,8 @@ a drive not plugged in), its songs stay in the list with your edits.
 
 ## Where your files are
 
-**Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`
-and the logs of scheduled runs (`logs`).
+**Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`,
+the songs' measured loudness (`loudness.json`) and the logs of scheduled runs (`logs`).
 
 | What | Windows | Mac | Linux |
 |---|---|---|---|

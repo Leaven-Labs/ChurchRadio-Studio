@@ -13,6 +13,7 @@
   "max_silence_seconds": 5,
   "silence_level_db": -40,
   "mp3_bitrate": "192k",
+  "loudness_lufs": -16,
   "compression": {
     "enabled": true,
     "ratio": 4,

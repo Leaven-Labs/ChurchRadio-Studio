@@ -43,6 +43,7 @@ STEPS = (("in the first", "start", "Finding the start of the service ..."),
          ("Cutting long silences", "silence", "Cutting long silences ..."),
          ("Reading song catalog", "songs", "Choosing the songs ..."),
          ("Listening to", "songs", "Listening to new songs ..."),
+         ("Evening out the loudness", "mp3", "Evening out the loudness ..."),
          ("Writing MP3", "mp3", "Writing the MP3 ..."))
 # The progress list: a step's name before, while and after it is done.
 STEP_ROWS = (("start", "Find the start", "Finding the start", "Found the start"),

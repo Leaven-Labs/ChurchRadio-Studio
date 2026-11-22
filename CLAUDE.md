@@ -72,6 +72,32 @@ item. Remove it from this file once it is built.
 - **1.5.1: the new icon and the www.leavenlabs.org address, nothing else.** `.github/RELEASE_NOTES.md`
   and the workflow's default tag are set for it. To release: merge, then run the Release workflow (or
   push `v1.5.1`). No Python code is changed. Not yet seen on a real Windows PC or Mac: the icon.
+- **1.6.0 (planned November 2026, asked for by the maintainer): four parts, in this order.** Part 1
+  can slip to 1.6.1 alone if the Windows build is stubborn; it changes no Python code.
+  1. **ffmpeg built from source for Windows and Linux, as on the Mac.** `tools/build_ffmpeg.sh` builds
+     the same pinned ffmpeg and LAME as the Mac job (versions and SHA-256 in the script; the test
+     `FfmpegBuild` keeps them equal). Every decoder, demuxer and filter is kept (any recording opens);
+     of the encoders and muxers only MP3, WAV, raw s16le and null (the Mac job still has all of them).
+     ffmpeg.org is refused from the cloud sessions' network: the script falls back to Ubuntu's copy of
+     the same tarball (same SHA-256). Wine does not run in the cloud sessions, so the .exe is only
+     tried on the Windows runner (its checks, then the installed app's test broadcast). Linux is built on the Linux job's Ubuntu;
+     Windows is cross-built with mingw-w64 in its own Linux job and handed to the Windows job.
+     Both are cached by the script's hash. Replaces BtbN's `latest`, which was neither pinned nor
+     checked. Built and tested in a cloud session (November 2026): Linux and Windows both build
+     (about 4 minutes), the unit tests pass with the Linux build, MKV/MP4 (H.264, AAC, Opus) and
+     WMA/FLAC/Ogg/M4A/WAV/MP3 read; the .exe needs only Windows' own DLLs. Size on Windows: BtbN's
+     ffmpeg.exe + ffprobe.exe were 268 MB (81 MB packed with xz -9), the new ones 41 MB (7.5 MB), so
+     on the first CI run (PR 22) the installer was 92 MB, down from 164 MB, and the Linux download
+     about 208 MB, down from 308 MB (Mac 119 MB). BtbN's `latest` was ffmpeg 8.x; the pin is
+     7.1.1, as on the Mac (the tests pass on it). Moving all three to 8.x is a later, separate step. Then look at why the
+     Linux download is still about 208 MB (Windows 92, Mac 119).
+  2. **Even loudness for the whole MP3**: ffmpeg `loudnorm` to a target set in Settings.
+  3. **A cue sheet next to the MP3**: what played, when, titles, permissions (for stations, CCLI).
+  4. **Cuts remembered per recording** (name, size, time saved; in the settings folder; old ones
+     cleared after a few months; "Listen again" button; `--build` uses them), and **keys for the
+     cuts**: click or Tab chooses the cut, arrows move it 1 s (Shift 5 s), S / E put the start / end
+     cut at the play marker (also buttons "Start cut here" / "End cut here"). Not while typing in a
+     time box.
 - **2.0.0: a port to Rust with Tauri (a web interface) is held for then.** Do not start it unasked.
   The cut rules in `prelude.py` are tuned to faster-whisper's word times and sureness; another
   Whisper engine (whisper.cpp) will need them tuned again against real recordings.
@@ -107,8 +133,8 @@ item. Remove it from this file once it is built.
   shown (`ui.Moving`). `motion` in config.json (a box on the Settings page) turns the animations off.
   The same look is in Stream Scheduler (0.0.7) in its own colours. Not yet seen on a real Windows PC or
   Mac.
-- Download size matters to the maintainer. The cheapest saving, on any toolkit, is a smaller ffmpeg
-  for Windows and Linux (built with only what the app uses, as the Mac job already does).
+- Download size matters to the maintainer. The ffmpeg for Windows and Linux is being made smaller in
+  1.6.0 (above).
 
 ## Suggested work, not yet scheduled (from the November 2026 code review)
 
@@ -120,10 +146,6 @@ the maintainer asks what to build next. Remove an item once it is built.
 - **Public-domain status does not affect what is broadcast.** `catalog.songs_for` ignores
   `catalog.cleared()`. Add a setting "only use songs that are allowed to broadcast", or say in the
   README that the status is only a guide.
-- Pin the BtbN ffmpeg build for Windows and Linux and verify its hash (the rest is pinned:
-  `requirements.txt`, `requirements-build.txt`, the Actions by commit, the Mac's ffmpeg and lame
-  sources by SHA-256; `.github/dependabot.yml` proposes updates). BtbN's `latest` changes daily, so
-  pin a dated build or build ffmpeg from source as the Mac job does (also the smaller download).
 - `builder.recent_songs` counts history entries, not weeks: filter by date. Write `history.json`
   atomically, as `save_config` does.
 - `audio.trim_service` does not check that the silence-detect pass worked.
@@ -138,9 +160,6 @@ the maintainer asks what to build next. Remove an item once it is built.
 
 ### Usability (offered in November 2026, after the new look; not yet asked for)
 
-- Keyboard keys for the cuts (arrows to nudge). Buttons "Start cut here" / "End cut here" that put a
-  cut at the play marker. (Typed cut times: 1.4.0. Space plays and pauses: 1.5.0.)
-- Remember the cuts per recording, so choosing the same recording again does not listen again.
 - Remember the window's size and position.
 - Read the service fewer times in one build (the silence cut inside the MP3 step, no temporary WAV).
 - Measure new songs in parallel in `catalog.update`.
@@ -149,11 +168,8 @@ the maintainer asks what to build next. Remove an item once it is built.
 ### Features
 
 1. Recording copyright warning from file tags (option C above).
-2. Loudness normalisation to a target (ffmpeg `loudnorm`, e.g. -16 LUFS) for the songs and service.
-3. A playlist / cue sheet saved next to the MP3 (what played, when, titles, permissions), for
-   stations and license reports such as CCLI's.
-4. A notice (email or desktop) when a scheduled run fails or is too long.
-5. Outro and station-ID slots (a closing announcement; a short ID between service and songs).
-6. Auto-fit when too long: offer a fade-out at the target length.
-7. Other languages and liturgies: multilingual speech models, holidays outside the US.
-8. Podcast output: chapter marks, cover art, optionally an RSS feed entry.
+2. A notice (email or desktop) when a scheduled run fails or is too long.
+3. Outro and station-ID slots (a closing announcement; a short ID between service and songs).
+4. Auto-fit when too long: offer a fade-out at the target length.
+5. Other languages and liturgies: multilingual speech models, holidays outside the US.
+6. Podcast output: chapter marks, cover art, optionally an RSS feed entry.

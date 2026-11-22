@@ -157,10 +157,14 @@ dim parts before and after are cut off.
   (or drag it along), then click **Play** under the picture or press the **space bar**. The marker
   moves as the recording plays; **Pause** (or the space bar again) stops it where it is. A click
   somewhere else while it plays goes on from there. The time next to **Play** is where the marker
-  is: type it into the **Start** or **End** box to put a cut there.
+  is. **Start cut here** and **End cut here** (or the keys **S** and **E**) put a cut at the marker:
+  listen until the pastor starts, pause, and press **S**.
 - **Drag a marker** to move a cut, or use the buttons under the picture (**−5 s**, **−1 s**, **+1 s**,
   **+5 s**; left for the start, right for the end). A marker at the very start or end of the
   recording cuts nothing there.
+- **Use the keys.** Click a cut marker (or press **Tab** until the picture is chosen: the cut gets a
+  gold ring), then move it with **←** and **→**, a second at a time (with **Shift**, five). **Tab**
+  goes from the start cut to the end cut.
 - **Type a time** in the **Start** or **End** box (`9:02`, `9:02.4` or `1:08:15`) and press Enter.
   Empty the box to cut nothing there.
 - **Zoom** into the picture with **+** and **−**, or hold **Ctrl** and turn the mouse wheel where you
@@ -174,6 +178,15 @@ dim parts before and after are cut off.
 
 To check every week before the MP3 is written, tick **Check the cuts before the MP3 is written**: the
 app finds the cuts and waits for you to click **Make the broadcast**. Scheduled runs never wait.
+
+**The cuts are remembered.** Choose the same recording again (after closing the app, say) and its
+cuts are back at once, without listening again; the card says **Cuts from last time** and whether you
+moved them. **Listen again** forgets them and listens. Cuts you moved are always used, also by
+scheduled runs (`--build --force` makes the broadcast again with your cuts). Cuts the app found are
+used again only while the **Start** choice, the end cut and the service words are the same. A
+recording is known by its name, size and the time it was saved, so a new recording with the same
+name is listened to. The cuts are kept for four months in `cuts.json` in
+[your settings folder](#where-your-files-are).
 
 ### The cue sheet
 
@@ -251,6 +264,7 @@ Sunday's season and songs.
 | `--keep-end` | Keep everything after the end of the service. |
 | `--no-compress` | Skip the broadcast compressor. |
 | `--force` | Make the broadcast again even if its MP3 is already there. |
+| `--listen-again` | Listen for the start and end again, not the [cuts remembered](#if-a-cut-is-wrong) for the recording. |
 | `--dry-run` | Only log which recording and date it would use, to check the set-up. |
 | `--settle 30` | Skip a recording changed in the last 30 minutes (default 10). |
 | `--log "D:\Radio\last run.log"` | Write the log here. |
@@ -543,7 +557,7 @@ a drive not plugged in), its songs stay in the list with your edits.
 ## Where your files are
 
 **Your settings folder** holds your settings, song list, history, `end_words.txt`, your `hymns.csv`,
-the songs' measured loudness (`loudness.json`) and the logs of scheduled runs (`logs`).
+the songs' measured loudness (`loudness.json`), the cuts of recent recordings (`cuts.json`) and the logs of scheduled runs (`logs`).
 
 | What | Windows | Mac | Linux |
 |---|---|---|---|

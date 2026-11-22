@@ -801,12 +801,16 @@ class Waveform(QWidget):
     Ctrl + the mouse wheel zooms where the pointer is.
 
     A click or a drag beside the cuts puts the play marker there (playhead: where the recording
-    is played from, see MainWindow.play_line); sought tells where it was put."""
+    is played from, see MainWindow.play_line); sought tells where it was put.
+
+    Keys: a click on a cut, or Tab, chooses it (chosen; it is drawn with a ring while the picture
+    has the keyboard); the left and right arrows move it a second (with Shift, NUDGE_FAR seconds)."""
     TOP, BOTTOM = 30, 24  # room for the cut labels above the wave and the times under it
     GRAB = 9              # a click this many pixels from a cut's line takes hold of it
     APART = 30.0          # the cuts stay at least this many seconds apart
     MIN_SPAN = 10.0       # zoomed in as far as it goes: this many seconds across the picture
     CUT_SPAN = 120.0      # zoom_to: this many seconds around a cut
+    NUDGE_FAR = 5.0       # Shift + an arrow moves the chosen cut this many seconds
     moved = Signal(str)   # the person moved a cut ("start" or "end"): mouse, nudge() or place()
     changed = Signal()    # the cuts or what is known of the recording changed
     sought = Signal(float)  # the person put the play marker at this second (click, or the end of a drag)
@@ -818,13 +822,18 @@ class Waveform(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMouseTracking(True)
         self.editable, self.drag, self.seeking, self.view, self.playhead = False, None, False, None, None
+        self.chosen = None  # the cut the arrow keys move: "start", "end" or None
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip("Click a cut (or press Tab) to choose it, then move it with the left and right arrows "
+                        "(1 second; with Shift, 5). S and E put the start and end cut at the play marker. "
+                        "The space bar plays and pauses.")
         self.reset()
 
     def reset(self):
         """A new recording: nothing is known yet."""
         self.levels, self.length, self.cuts, self.note = None, 0.0, {}, "Reading the recording ..."
         self.detail, self.per_second = None, 0  # the loudness in small slices, drawn when zoomed in
-        self.drag, self.seeking, self.playhead = None, False, None
+        self.drag, self.seeking, self.playhead, self.chosen = None, False, None, None
         was, self.view = self.view, None  # zoomed in: (the first second shown, how many seconds)
         self.redraw()
         if was:
@@ -944,10 +953,48 @@ class Waveform(QWidget):
         near = sorted((abs(x - self.cut_x(which)), which) for which in ("start", "end"))
         return near[0][1] if near[0][0] <= self.GRAB else None
 
+    def choose(self, which):
+        """Choose the cut the arrow keys move (None: none)."""
+        if which != self.chosen:
+            self.chosen = which
+            self.update()
+
+    def focusInEvent(self, event):  # noqa: N802
+        """Tab into the picture chooses the start cut (Shift+Tab: the end cut)."""
+        if self.editable and self.known() and event.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason):
+            self.choose("start" if event.reason() == Qt.TabFocusReason else "end")
+        self.update()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):  # noqa: N802
+        self.update()
+        super().focusOutEvent(event)
+
+    def focusNextPrevChild(self, forward):  # noqa: N802
+        """Tab goes from the start cut to the end cut, then on to the next control (Shift+Tab back)."""
+        if self.editable and self.known() and self.hasFocus():
+            if forward and self.chosen == "start":
+                self.choose("end")
+                return True
+            if not forward and self.chosen == "end":
+                self.choose("start")
+                return True
+        return super().focusNextPrevChild(forward)
+
+    def keyPressEvent(self, event):  # noqa: N802
+        step = {Qt.Key_Left: -1.0, Qt.Key_Right: 1.0}.get(event.key())
+        if step and self.chosen and self.editable and self.known():
+            self.nudge(self.chosen, step * (self.NUDGE_FAR if event.modifiers() & Qt.ShiftModifier else 1.0))
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             x = event.position().x()
             self.drag = self.cut_near(x)
+            if self.drag:
+                self.choose(self.drag)
             if not self.drag and self.known():  # beside the cuts: the play marker goes there
                 self.seeking = True
                 self.set_playhead(self.seconds_at(x))
@@ -1075,6 +1122,14 @@ class Waveform(QWidget):
                 p.setBrush(QColor(colors["accent"]))
                 p.setOpacity(0.6 if side else 1.0)
                 p.drawRoundedRect(QRectF(left, 0, tw, 22), 5, 5)
+                if which == self.chosen and self.hasFocus() and self.editable:  # the cut the arrows move
+                    p.setOpacity(1.0)
+                    p.setPen(QPen(QColor(colors["spark"]), 2))
+                    p.setBrush(Qt.NoBrush)
+                    p.drawRoundedRect(QRectF(left + 1, 1, tw - 2, 20), 5, 5)
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(QColor(colors["accent"]))
+                    p.setOpacity(0.6 if side else 1.0)
                 if not side:
                     p.drawRect(QRectF(min(max(x - 1, 0.0), w - 2), 20, 2, self.height() - self.BOTTOM - 20))
                 p.setOpacity(1.0)

@@ -450,6 +450,81 @@ class Loudness(unittest.TestCase):
             self.assertEqual(measured.call_count, 1)  # only the service: the songs were remembered
 
 
+class RememberedCuts(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        env = mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name})
+        env.start()
+        self.addCleanup(env.stop)
+        self.rec = os.path.join(self.dir.name, "2026-11-15 10-28-41.mkv")
+        with open(self.rec, "wb") as fh:
+            fh.write(b"x" * 100)
+
+    def test_the_same_recording_is_known_again(self):
+        key = builder.recording_key(self.rec)
+        moved = os.path.join(self.dir.name, "sub")
+        os.makedirs(moved)
+        os.replace(self.rec, os.path.join(moved, os.path.basename(self.rec)))
+        self.assertEqual(builder.recording_key(os.path.join(moved, os.path.basename(self.rec))), key)  # moved
+        with open(self.rec, "wb") as fh:
+            fh.write(b"y" * 200)  # another recording under the same name
+        self.assertNotEqual(builder.recording_key(self.rec), key)
+
+    def test_app_cuts_only_with_the_same_settings_hand_cuts_always(self):
+        cfg = {"start_phrase": "Good morning", "end_phrase": "Go now in peace", "target_minutes": 60}
+        auto = builder.cut_settings(cfg, "Auto", True)
+        self.assertIsNone(builder.remembered_cuts(self.rec, auto))
+        self.assertTrue(builder.remember_cuts(self.rec, 542.0, 4095.5, "app", auto))
+        self.assertEqual(builder.remembered_cuts(self.rec, auto)["start"], 542.0)
+        self.assertEqual(builder.cut_settings({**cfg, "target_minutes": 30}, "Auto", True), auto)  # not a cut setting
+        for other in (builder.cut_settings(cfg, "Keep start", True), builder.cut_settings(cfg, "Auto", False),
+                      builder.cut_settings({**cfg, "end_phrase": "Go in peace"}, "Auto", True)):
+            self.assertIsNone(builder.remembered_cuts(self.rec, other))  # the app would listen differently
+        builder.remember_cuts(self.rec, 530.0, None, "hand")
+        for settings in (auto, builder.cut_settings(cfg, "Keep start", False)):
+            found = builder.remembered_cuts(self.rec, settings)
+            self.assertEqual((found["start"], found["end"], found["by"]), (530.0, None, "hand"))
+        self.assertIn("moved by hand", builder.remembered_text(found))
+
+    def test_old_ones_go_and_a_spoilt_file_is_ignored(self):
+        other = os.path.join(self.dir.name, "old.mkv")
+        open(other, "wb").close()
+        builder.remember_cuts(other, 10.0, None, "hand", today=D(2026, 6, 1))
+        builder.remember_cuts(self.rec, 20.0, None, "hand", today=D(2026, 11, 15))
+        self.assertIsNone(builder.remembered_cuts(other, ""))  # more than CUTS_KEEP_DAYS before
+        self.assertEqual(builder.remembered_cuts(self.rec, "")["start"], 20.0)
+        with open(os.path.join(self.dir.name, "cuts.json"), "w") as fh:
+            fh.write("{not json")
+        self.assertIsNone(builder.remembered_cuts(self.rec, ""))
+        self.assertTrue(builder.remember_cuts(self.rec, 30.0, 90.0, "hand"))
+        self.assertEqual(builder.remembered_cuts(self.rec, "")["end"], 90.0)
+        self.assertIsNone(builder.remembered_cuts(os.path.join(self.dir.name, "gone.mkv"), ""))
+
+    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed")
+    def test_build_does_not_listen_again(self):
+        svc = os.path.join(self.dir.name, "service.wav")
+        _tone(svc, [("tone", 20)])
+        cfg = {"intro": "", "song_folders": [], "output_folder": self.dir.name, "target_minutes": 5,
+               "broadcast_name": "Test", "loudness_lufs": None, "compression": {"enabled": False}}
+        kw = {"cfg": cfg, "date": D(2026, 11, 15), "log": lambda m: None, "start_mode": "Auto", "cut_end": True}
+        with mock.patch.object(builder, "find_service_start", return_value=4.0) as start, \
+                mock.patch.object(builder, "find_service_end", return_value=16.0):
+            out = builder.build(svc, **kw)
+            self.assertAlmostEqual(audio.duration(out), 12.0, delta=0.3)
+            told, lines = [], []
+            builder.build(svc, **{**kw, "log": lines.append}, tell=lambda what, v: told.append(what))
+            self.assertEqual(start.call_count, 1)  # the second time: the cuts from the first
+            self.assertIn("remembered", told)
+            self.assertTrue(any("Cuts from last time (found by listening" in line for line in lines))
+            builder.build(svc, **kw, listen_again=True)
+            self.assertEqual(start.call_count, 2)
+            builder.remember_cuts(svc, 2.0, 18.0, "hand")  # moved in the window
+            out = builder.build(svc, **{**kw, "start_mode": "Keep start"})
+            self.assertEqual(start.call_count, 2)
+            self.assertAlmostEqual(audio.duration(out), 16.0, delta=0.3)
+
+
 class CueSheet(unittest.TestCase):
     def test_times(self):
         self.assertEqual([builder.cue_time(x) for x in (0, 59.6, 61, 3725.2, -3)],
@@ -1762,6 +1837,75 @@ class Windows(unittest.TestCase):
             _pump(lambda: len(stops) > n)
             self.assertEqual((len(stops), w.playing, w.line_btn.text()), (n + 1, None, "Play"))
 
+    def test_keys_and_buttons_for_the_cuts(self):
+        from PySide6.QtCore import QPointF
+        from PySide6.QtTest import QTest
+        with mock.patch.dict(os.environ, {"CHURCHRADIO_DATA_DIR": self.dir.name}):
+            rec = os.path.join(self.dir.name, "service.mkv")
+            open(rec, "wb").close()
+            w = mainwindow.MainWindow()
+            self.addCleanup(w.close)
+            w.show()
+            w.wave.set_length(4440.0)
+            w.wave.set_cut("start", 542.0)
+            w.wave.set_cut("end", 4000.0)
+            w.job = {"path": rec}
+            w.show_cut_controls(make=False)
+            w.show_page("broadcast")
+            _pump()
+            wave = w.wave
+            self.assertEqual(wave.chosen, None)
+            QTest.mouseClick(wave, Qt.LeftButton, pos=QPointF(wave.cut_x("start"), 60).toPoint())
+            self.assertEqual(wave.chosen, "start")
+            wave.setFocus()
+            QTest.keyClick(wave, Qt.Key_Right)
+            self.assertEqual(wave.cuts["start"], 543.0)
+            QTest.keyClick(wave, Qt.Key_Left, Qt.ShiftModifier)
+            self.assertEqual(wave.cuts["start"], 538.0)
+            self.assertEqual(w.cut_times["start"].text(), "8:58.0")
+            self.assertTrue(wave.focusNextPrevChild(True))  # Tab: the end cut, then on
+            self.assertEqual(wave.chosen, "end")
+            QTest.keyClick(wave, Qt.Key_Left)
+            self.assertEqual(wave.cuts["end"], 3999.0)
+            found = builder.remembered_cuts(rec, "")
+            self.assertEqual((found["start"], found["end"], found["by"]), (538.0, 3999.0, "hand"))  # remembered
+
+            self.assertFalse(w.here_btns["start"].isEnabled())  # no play marker yet
+            w.cut_here("start")
+            self.assertIn("play marker", w.status.text())
+            wave.set_playhead(600.0)
+            w.show_playing()
+            self.assertTrue(w.here_btns["start"].isEnabled())
+            box = w.cut_times["end"]
+            box.setFocus()
+            _pump()
+            QTest.keyClicks(box, "se")  # typing in a time box: the letters are typed, no cut moves
+            self.assertEqual((box.text()[-2:], wave.cuts["start"], wave.cuts["end"]), ("se", 538.0, 3999.0))
+            w.show_cut_times()
+            wave.setFocus()
+            _pump()
+            QTest.keyClick(w, Qt.Key_S)  # S
+            self.assertEqual(wave.cuts["start"], 600.0)
+            wave.set_playhead(3500.0)
+            w.here_btns["end"].click()
+            self.assertEqual(wave.cuts["end"], 3500.0)
+            w.set_busy(True)
+            self.assertFalse(w.here_keys["end"].isEnabled())  # not while a broadcast is made
+            w.set_busy(False)
+
+            w.memory.hide()
+            w.busy = True
+            w.told("remembered", {"start": 1.0, "end": None, "by": "hand", "saved": "2026-11-15"})
+            w.busy = False
+            self.assertFalse(w.memory.isHidden())
+            self.assertIn("moved by hand, 11/15/2026", w.memory_text.text())
+            with mock.patch.object(w, "launch") as launch, mock.patch.object(mainwindow.cli, "take_lock",
+                                                                            return_value=True):
+                w.listen_btn.click()
+            launch.assert_called_once_with(None, listen_again=True)
+            wave.nudge("start", 1.0)  # moving a cut: the note goes
+            self.assertTrue(w.memory.isHidden())
+
     def test_times_are_typed(self):
         self.assertEqual([ui.parse_clock(t) for t in ("9:02", "9:02.4", "1:08:15", "542", "542,5", " 0:07 ")],
                          [542.0, 542.4, 4095.0, 542.0, 542.5, 7.0])
@@ -2626,6 +2770,9 @@ class CommandLine(unittest.TestCase):
         service, kw = calls[0]
         self.assertEqual((service, kw["date"], kw["start_mode"], kw["cut_end"], kw["compress"]),
                          (p, D(2026, 11, 15), "Keep start", False, False))
+        self.assertFalse(kw["listen_again"])
+        self.run_cli("--build", p, "--force", "--listen-again", build=build)
+        self.assertTrue(calls[-1][1]["listen_again"])
         self.assertIn("Writing MP3", log)
         self.assertIn("Saved:", log)
         self.assertFalse(os.path.exists(self.cli.lock_path()))  # the lock is let go

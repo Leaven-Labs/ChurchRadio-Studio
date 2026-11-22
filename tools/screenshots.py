@@ -112,7 +112,7 @@ def main():
     import ui
 
     mp3 = example_data()
-    paths.version = lambda: "1.5.3"  # (from the source code it says "development")
+    paths.version = lambda: "1.6.0"  # (from the source code it says "development")
     app = ui.start_app(["screenshots"], "light")
     ui.set_motion(False)  # still pictures: nothing is caught half-way through an animation
     ui.set_motion = lambda on: None  # (the window would switch them on again from the settings)

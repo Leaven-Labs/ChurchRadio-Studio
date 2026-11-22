@@ -72,8 +72,9 @@ item. Remove it from this file once it is built.
 - **1.5.1: the new icon and the www.leavenlabs.org address, nothing else.** `.github/RELEASE_NOTES.md`
   and the workflow's default tag are set for it. To release: merge, then run the Release workflow (or
   push `v1.5.1`). No Python code is changed. Not yet seen on a real Windows PC or Mac: the icon.
-- **1.6.0 (planned November 2026, asked for by the maintainer): four parts, in this order.** Part 1
-  can slip to 1.6.1 alone if the Windows build is stubborn; it changes no Python code.
+- **1.6.0: ffmpeg from source, even loudness, the cue sheet, remembered cuts and keys (asked for by the
+  maintainer, November 2026; all four parts merged).** `.github/RELEASE_NOTES.md` and the workflow's
+  default tag are set for it. To release: merge, then run the Release workflow (or push `v1.6.0`).
   1. **ffmpeg built from source for Windows and Linux, as on the Mac.** `tools/build_ffmpeg.sh` builds
      the same pinned ffmpeg and LAME as the Mac job (versions and SHA-256 in the script; the test
      `FfmpegBuild` keeps them equal). Every decoder, demuxer and filter is kept (any recording opens);

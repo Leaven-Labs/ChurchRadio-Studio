@@ -10,11 +10,12 @@ The first start downloads the speech-recognition models once (about 620 MB); aft
 
 Already installed? Install the new version over the old one: it keeps your settings, songs, history and the speech models.
 
-## What's new in 1.5.3
+## What's new in 1.6.0
 
-- **Silences in the service, on the Settings page.** Under "Service words" you can now say how long a silence must be before it is shortened ("Shorten silences longer than", 5 seconds unless you change it) and how quiet counts as silence. The second is a list in plain words, from "Only complete silence" to "Soft sounds too, such as a murmur or soft organ", with "A quiet room" as the usual choice. If quiet prayers or soft music are cut short, choose a line further up the list.
-- **Songs with or without their silence.** A new box under "Songs", "Remove the silence at the start and end of each song", is ticked as before. Untick it to play each song whole.
-
-These three were settings in config.json before; what they do has not changed, and your own values are kept.
+- **Even loudness.** The intro, the service and each song are now made equally loud, so a quiet sermon and a loud CD play at the same level, and the whole MP3 is brought to the same level every week. **This is on for everyone, also when you update**: your MP3 comes out at −16 LUFS (the usual level for podcasts and web radio), which may be a little louder or quieter than before. To choose another level, or to turn it off, use **Loudness** on the Settings page: −14 (loud, like music streaming), −16, −18, −23 (the European broadcast standard, EBU R128), −24 (the US broadcast standard, ATSC A/85), or "Not evened out". Ask your station if it wants a level. Making the MP3 takes a little longer, because the broadcast is read once more before it is written; each song is measured only the first time it is used.
+- **A cue sheet next to the MP3.** Each broadcast now also saves `<name> cue sheet.csv` beside the MP3. It opens in Excel and lists the intro, the service and each song: where it starts and ends in the MP3, its title and file, and whether the song may be broadcast, with the permission you typed for it. Give it to your station, or keep it for license reports such as CCLI's. The **Cue sheet** button on the finished broadcast opens it. If the folder you save MP3s in is one your station collects them from, the CSV will be there too; untick **Save a cue sheet next to the MP3** in Settings if you don't want it.
+- **The cuts are remembered.** Choose the same recording again (after closing the app, say) and its cuts come back at once, without listening again. Cuts you moved by hand are always used, also by scheduled runs; **Listen again** forgets them and listens. For scheduled runs there is `--listen-again`.
+- **Keys and buttons for the cuts.** Click a cut (or press Tab) and move it with ← and → (with Shift, 5 seconds). Press **S** or **E**, or click **Start cut here** / **End cut here**, to put a cut at the play marker: listen until the pastor starts, pause, and press **S**.
+- **A smaller download.** ffmpeg is now built for the app from its source code on Windows and Linux too, with only what the app needs. The Windows installer is about 92 MB instead of 164 MB, and the Linux download about 208 MB instead of 308 MB.
 
 See the [README](https://github.com/Leaven-Labs/ChurchRadio-Studio#readme) for how to use it. `SHA256SUMS.txt` holds the checksums of the three downloads.

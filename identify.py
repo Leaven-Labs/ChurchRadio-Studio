@@ -17,7 +17,7 @@ import re
 import subprocess
 from difflib import SequenceMatcher
 
-import churchyear
+import servicecal
 
 LISTEN_SEC = 150.0       # listen to this much of the start of the song (the first verse)
 LINE_MIN = 0.80          # a heard line must be this alike to a hymn line to count
@@ -165,6 +165,6 @@ def identify(path, hymns, tags=None, heard="", known_title=""):
     if hymn and (not known_title or _best_window(tokens(known_title), hymn["title_tokens"]) >= TITLE_MIN):
         seasons = list(hymn["seasons"])
     else:
-        seasons = sorted(churchyear.guess_seasons(" ".join([title, path, tags.get("album", "")])))
+        seasons = sorted(servicecal.guess_seasons(" ".join([title, path, tags.get("album", "")])))
     return {"title": title, "seasons": seasons, "how": how, "sure": round(sure, 2),
             "hymn": hymn["title"] if hymn else ""}

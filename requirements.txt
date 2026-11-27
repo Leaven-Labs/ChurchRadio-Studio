@@ -1,11 +1,14 @@
 # What the program needs, each at one exact version, so every build uses the same code.
-# Asked for directly: PySide6-Essentials, numpy, faster-whisper. The rest is what those three need.
+# Asked for directly: PySide6-Essentials, numpy, faster-whisper, churchyear. The rest is what those
+# need. churchyear (Leaven Labs, MIT, no dependencies of its own) comes from GitHub at its v1.0.0
+# commit because it isn't on PyPI yet; Dependabot doesn't update it, so change the commit by hand.
 # The lines with "sys_platform" are only installed on that system; keep them (the file serves
 # Windows, Mac and Linux). Dependabot (.github/dependabot.yml) proposes newer versions.
 # To work the whole list out again:
-#   printf 'PySide6-Essentials>=6.8\nnumpy\nfaster-whisper\n' | uv pip compile - --universal --python-version 3.12 --no-header --no-annotate
+#   printf 'PySide6-Essentials>=6.8\nnumpy\nfaster-whisper\nchurchyear @ git+https://github.com/Leaven-Labs/churchyear@v1.0.0\n' | uv pip compile - --universal --python-version 3.12 --no-header --no-annotate
 anyio==4.16.0 ; sys_platform != 'emscripten'
 av==19.0.2
+churchyear @ git+https://github.com/Leaven-Labs/churchyear@5142751d65a3e41e2d74edd6a57a249360a587ed
 click==8.5.1
 colorama==0.4.6 ; sys_platform == 'win32'
 ctranslate2==4.9.0

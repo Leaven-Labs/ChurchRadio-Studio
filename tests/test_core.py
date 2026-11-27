@@ -19,6 +19,7 @@ import catalog  # noqa: E402
 import churchyear as cy  # noqa: E402
 import picker  # noqa: E402
 import prelude  # noqa: E402
+import servicecal as sc  # noqa: E402
 
 D = dt.date
 
@@ -45,16 +46,16 @@ class ChurchYear(unittest.TestCase):
             self.assertEqual(cy.season(date), want, date)
 
     def test_date_from_filename(self):
-        self.assertEqual(cy.date_from_filename("BLCTrad10.11.2026 08-10.mkv"), D(2026, 10, 11))
-        self.assertEqual(cy.date_from_filename("x 2026-12-06.mkv"), D(2026, 12, 6))
-        self.assertIsNone(cy.date_from_filename("service.mkv"))
+        self.assertEqual(sc.date_from_filename("BLCTrad10.11.2026 08-10.mkv"), D(2026, 10, 11))
+        self.assertEqual(sc.date_from_filename("x 2026-12-06.mkv"), D(2026, 12, 6))
+        self.assertIsNone(sc.date_from_filename("service.mkv"))
 
     def test_guess(self):
-        self.assertEqual(cy.guess_seasons(r"C:\Church Songs #1\O Come O Come Emmanuel (Advent).mp3"), {"advent"})
-        self.assertEqual(cy.guess_seasons("Christmas/Joy to the World.mp3"), {"christmas"})
-        self.assertEqual(cy.guess_seasons("A Mighty Fortress.mp3"), set())
-        self.assertEqual(cy.guess_seasons("Christmas - Silent Night.mp3"), {"christmas"})
-        self.assertEqual(cy.guess_seasons("Lent_Beautiful Savior.mp3"), {"lent"})
+        self.assertEqual(sc.guess_seasons(r"C:\Church Songs #1\O Come O Come Emmanuel (Advent).mp3"), {"advent"})
+        self.assertEqual(sc.guess_seasons("Christmas/Joy to the World.mp3"), {"christmas"})
+        self.assertEqual(sc.guess_seasons("A Mighty Fortress.mp3"), set())
+        self.assertEqual(sc.guess_seasons("Christmas - Silent Night.mp3"), {"christmas"})
+        self.assertEqual(sc.guess_seasons("Lent_Beautiful Savior.mp3"), {"lent"})
 
     def test_patriotic_weekends(self):
         yes = {
@@ -1294,7 +1295,7 @@ HYMNS = identify.load_hymns(os.path.join(os.path.dirname(os.path.dirname(os.path
 class Identify(unittest.TestCase):
     def test_hymn_list_loads_and_seasons_are_known(self):
         self.assertGreater(len(HYMNS), 100)
-        known = set(cy.SEASONS) | {cy.PATRIOTIC}
+        known = set(cy.SEASONS) | {sc.PATRIOTIC}
         for h in HYMNS:
             self.assertTrue(set(h["seasons"]) <= known, h["title"])
             self.assertTrue(h["lines"] or len(h["title_tokens"]) >= 2, h["title"])
@@ -1412,19 +1413,19 @@ class AddSongsHelpers(unittest.TestCase):
 
 class ServiceDate(unittest.TestCase):
     def test_default_is_the_coming_sunday(self):
-        self.assertEqual(cy.default_service_date(D(2026, 11, 11)), D(2026, 11, 15))  # Wednesday
-        self.assertEqual(cy.default_service_date(D(2026, 11, 14)), D(2026, 11, 15))  # Saturday
-        self.assertEqual(cy.default_service_date(D(2026, 11, 15)), D(2026, 11, 15))  # Sunday: today
-        self.assertEqual(cy.default_service_date(D(2026, 11, 16)), D(2026, 11, 22))  # Monday
-        self.assertEqual(cy.default_service_date(D(2026, 12, 31)), D(2027, 1, 3))   # over the new year
+        self.assertEqual(sc.default_service_date(D(2026, 11, 11)), D(2026, 11, 15))  # Wednesday
+        self.assertEqual(sc.default_service_date(D(2026, 11, 14)), D(2026, 11, 15))  # Saturday
+        self.assertEqual(sc.default_service_date(D(2026, 11, 15)), D(2026, 11, 15))  # Sunday: today
+        self.assertEqual(sc.default_service_date(D(2026, 11, 16)), D(2026, 11, 22))  # Monday
+        self.assertEqual(sc.default_service_date(D(2026, 12, 31)), D(2027, 1, 3))   # over the new year
 
     def test_which_date_is_used(self):
         shown, today = D(2026, 11, 15), D(2026, 11, 11)
         # Picked in the calendar: always that date.
-        self.assertEqual(cy.service_date(D(2026, 11, 8), True, "BLC10.11.2026.mkv", today), D(2026, 11, 8))
+        self.assertEqual(sc.service_date(D(2026, 11, 8), True, "BLC10.11.2026.mkv", today), D(2026, 11, 8))
         # Not picked: the date in the file name, else the coming Sunday.
-        self.assertEqual(cy.service_date(shown, False, "BLC10.11.2026.mkv", today), D(2026, 10, 11))
-        self.assertEqual(cy.service_date(D(2026, 10, 11), False, "service.mkv", today), D(2026, 11, 15))
+        self.assertEqual(sc.service_date(shown, False, "BLC10.11.2026.mkv", today), D(2026, 10, 11))
+        self.assertEqual(sc.service_date(D(2026, 10, 11), False, "service.mkv", today), D(2026, 11, 15))
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # the window tests draw to memory, not a screen

@@ -704,7 +704,7 @@ their own setting. Run the script again after the look of the app changes.
 | `pdlookup.py` | The public-domain lookup (Wikidata, then the app's hymn list). |
 | `identify.py` | Finds a song's title and seasons from tags, lyrics or file name. |
 | `hymns.csv` | The hymn list used to recognise songs. |
-| `churchyear.py` | The church year, patriotic holiday weekends, the default service date. |
+| `servicecal.py` | Song seasons from file names, the service date. The church year itself (Easter, seasons, patriotic holiday weekends) comes from the [churchyear](https://github.com/Leaven-Labs/churchyear) package, shared with ChurchRadio Manager. |
 | `paths.py` | Where the program, its defaults and the user's files are. |
 | `config.json` | Default settings (copied to the user's folder on first start). |
 | `assets/` | The icon (`icon.svg` is the source) and two small pictures for tick boxes and drop-down arrows. |

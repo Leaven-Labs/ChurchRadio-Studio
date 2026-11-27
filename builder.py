@@ -11,6 +11,7 @@ import audio
 import catalog
 import paths
 import churchyear
+import servicecal
 import picker
 import prelude
 
@@ -453,7 +454,7 @@ def build(service, cfg=None, date=None, log=print, start_mode=None, warn=None, c
     intro = (cfg.get("intro") or "").strip()
     if intro and not os.path.exists(intro):
         raise RuntimeError(f"Intro file not found: {intro}\nChoose it again in Settings.")
-    date = date or churchyear.date_from_filename(os.path.basename(service)) or dt.date.today()
+    date = date or servicecal.date_from_filename(os.path.basename(service)) or dt.date.today()
     season = churchyear.season(date)
     log(f"Service date {date:%m/%d/%Y}: season of {season.title()}")
     holiday = churchyear.patriotic_holiday(date, cfg.get("patriotic_holidays", churchyear.HOLIDAYS))

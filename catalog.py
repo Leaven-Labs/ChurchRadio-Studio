@@ -22,6 +22,7 @@ import csv
 import os
 
 import churchyear
+import servicecal
 
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
 FIELDS = ["file", "title", "duration", "seasons", "enabled", "words", "start_silence", "end_silence",
@@ -70,7 +71,7 @@ def update(path, folders, get_duration, log=print, get_edges=None):
     for f in files:
         row = rows.setdefault(f, {"file": f, "duration": "", "seasons": None, "enabled": "yes"})
         if row["seasons"] is None:
-            row["seasons"] = ";".join(sorted(churchyear.guess_seasons(f)))
+            row["seasons"] = ";".join(sorted(servicecal.guess_seasons(f)))
             log(f"New song: {os.path.basename(f)} -> {row['seasons'] or 'general'}")
         if not row.get("duration"):
             try:
@@ -170,9 +171,9 @@ def songs_for(rows, season, patriotic=False, trim=True):
 
     trim: cut the silence at the start and end of each song. 'duration' is then the length
     that is played, and 'start' / 'end' say which part of the file to play."""
-    allowed = set(churchyear.allowed_seasons(season))
+    allowed = set(servicecal.allowed_seasons(season))
     if patriotic:
-        allowed.add(churchyear.PATRIOTIC)
+        allowed.add(servicecal.PATRIOTIC)
     out = []
     for r in rows.values():
         if not is_on(r):
@@ -235,7 +236,7 @@ def parse_seasons(text):
         if not word:
             continue
         tag = SEASON_ALIASES.get(word, word.replace(" ", ""))
-        if tag and tag not in churchyear.SEASONS and tag != churchyear.PATRIOTIC:
+        if tag and tag not in churchyear.SEASONS and tag != servicecal.PATRIOTIC:
             raise ValueError(f'unknown season "{part.strip()}"')
         if tag and tag not in tags:
             tags.append(tag)
@@ -297,7 +298,7 @@ def import_csv(path, import_path, folders, get_duration, get_edges=None, log=pri
         if key is None:
             key = by_norm[os.path.normcase(os.path.abspath(found))] = found
             rows[key] = {"file": found, "duration": "", "enabled": "yes",
-                         "seasons": ";".join(sorted(churchyear.guess_seasons(found)))}
+                         "seasons": ";".join(sorted(servicecal.guess_seasons(found)))}
             added += 1
         else:
             updated += 1

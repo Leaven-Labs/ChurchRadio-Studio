@@ -18,6 +18,7 @@ import audio
 import builder
 import catalog
 import churchyear
+import servicecal
 import cli
 import paths
 import player
@@ -1043,7 +1044,7 @@ class MainWindow(QWidget):
         """A recording was chosen: find its cuts and (unless they are checked first) make the broadcast."""
         if not self.may_start():
             return
-        date = churchyear.service_date(self.date.get(), self.date.changed, os.path.basename(path))
+        date = servicecal.service_date(self.date.get(), self.date.changed, os.path.basename(path))
         if date != self.date.get():
             self.date.set_date(date)  # show the date read from the file name
             self.show_season()

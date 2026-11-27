@@ -22,7 +22,7 @@ import sys
 import time
 
 import builder
-import churchyear
+import servicecal
 import paths
 import prelude
 
@@ -81,7 +81,7 @@ def recordings(folder):
 def recording_date(path):
     """The service date: from the file name, else the day the file was last written (the end of
     the recording; copying a file in Windows keeps that date)."""
-    return churchyear.date_from_filename(os.path.basename(path)) or \
+    return servicecal.date_from_filename(os.path.basename(path)) or \
         dt.date.fromtimestamp(os.path.getmtime(path))
 
 

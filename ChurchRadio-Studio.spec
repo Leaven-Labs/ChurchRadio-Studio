@@ -39,6 +39,8 @@ except Exception:
 # follows them. We collect their data (sentencepiece vocab, etc.) to be safe.
 tokenizers_data = collect_data_files("tokenizers")
 huggingface_data = collect_data_files("huggingface_hub")
+# The churchyear package reads its commemorations list (a CSV inside the package) when asked.
+churchyear_data = collect_data_files("churchyear")
 
 # App defaults that travel with the program so first-run copy-out works.
 # copy_out_default() copies these into the user's folder on first run, never overwriting.
@@ -57,7 +59,7 @@ app_defaults += [("assets/icon.ico", "assets"), ("assets/icon-256.png", "assets"
                  ("assets/ui-tick.png", "assets"), ("assets/ui-chevron.png", "assets")]
 
 datas = []
-for d in (faster_whisper_data, tokenizers_data, huggingface_data):
+for d in (faster_whisper_data, tokenizers_data, huggingface_data, churchyear_data):
     datas.extend(d)
 datas.extend(app_defaults)
 

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QDat
                                QSizePolicy, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 import paths
-from churchyear import default_service_date
+from servicecal import default_service_date
 
 THEMES = ("auto", "light", "dark")
 THEME_LABELS = {"auto": "Same as the system", "light": "Light", "dark": "Dark"}

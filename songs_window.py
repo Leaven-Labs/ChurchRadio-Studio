@@ -17,13 +17,13 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QDial
 
 import audio
 import catalog
-import churchyear
+import servicecal
 import pdlookup
 import ui
 
 SEASON_LABELS = {"advent": "Advent", "christmas": "Christmas", "epiphany": "Epiphany", "lent": "Lent",
                  "holyweek": "Holy Week", "easter": "Easter", "pentecost": "Pentecost",
-                 churchyear.PATRIOTIC: "Patriotic"}
+                 servicecal.PATRIOTIC: "Patriotic"}
 SHOW = ("All songs", "On", "Off", "No words", "Public domain", "Allowed to broadcast", "Needs permission",
         "Not looked up")
 # The choices above the list: what the button says, and its name in matches().
@@ -130,7 +130,7 @@ def ask_seasons(parent, name, current, on_ok):
     lay.addWidget(ui.label(f"When may {name} play?", "strong", wrap=True))
     tick = {}
     for tag, text in SEASON_LABELS.items():
-        tick[tag] = QCheckBox(text + (" (only on the holiday weekend)" if tag == churchyear.PATRIOTIC else ""))
+        tick[tag] = QCheckBox(text + (" (only on the holiday weekend)" if tag == servicecal.PATRIOTIC else ""))
         tick[tag].setChecked(tag in current)
         lay.addWidget(tick[tag])
     lay.addWidget(ui.label("None ticked = General: may play any time of the year.", "hint"))
